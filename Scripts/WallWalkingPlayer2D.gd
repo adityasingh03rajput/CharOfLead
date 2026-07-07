@@ -27,8 +27,32 @@ var _has_won := false
 var _is_shooting := false
 
 # Realistic Movement States
-enum MoveState { FLOOR, WALL_LEFT, WALL_RIGHT, CEILING, AIR }
+enum MoveState { FLOOR, WALL_LEFT, WALL_RIGHT, CEILING, AIR, GRAPPLE }
 var _current_state := MoveState.AIR
+
+# ── 2D Tactical Grapple (only the UNARMED victim gets this) ──
+@export_group("Grapple")
+@export var grapple_range: float = 560.0     # max reticle/anchor distance
+@export var reticle_speed: float = 480.0     # px/s while steering with Ctrl+WASD
+@export var zip_speed: float = 1550.0        # max traverse speed toward anchor
+@export var zip_accel: float = 6500.0        # how hard the cable yanks you in
+@export var arrival_dist: float = 26.0       # detach when this close to the anchor
+@export var grapple_timeout: float = 1.6     # safety auto-release
+@export var grapple_kick: float = 520.0      # E/jump bail-out impulse
+
+enum GrappleState { OFF, AIMING, ZIPPING }
+var _grapple_state: int = GrappleState.OFF
+var _reticle_pos: Vector2 = Vector2.ZERO     # world-space aim point
+var _anchor: Vector2 = Vector2.ZERO          # world-space attached point
+var _grapple_t: float = 0.0                  # timeout accumulator
+var _fire_was_down: bool = false             # F edge-detect
+var _e_was_down: bool = false                # E edge-detect
+const GRAPPLE_COLOR := Color(0.25, 0.8, 1.0) # electric-blue cable/reticle
+
+# Grapple visuals (top_level so they live in world space, not the rotating rig)
+var _cable: Line2D
+var _spike: Node2D
+var _reticle: Node2D
 
 # Pose IDs
 const POSE_IDLE     := 1
@@ -43,6 +67,7 @@ const POSE_CLIMB      := 9
 const POSE_MONKEY_BAR := 10
 const POSE_WALL_COMBAT_IDLE := 11
 const POSE_WALL_COMBAT_MOVE := 12
+const POSE_GRAPPLE          := 13
 
 # Shadow-warrior silhouette parts: a near-black core with a glowing team-coloured rim.
 var _visuals: Node2D
@@ -74,6 +99,7 @@ var _facing_right: bool = true
 @onready var _act_down: String = "p%d_down" % player_id
 @onready var _act_jump: String = "p%d_jump" % player_id
 @onready var _act_fire: String = "p%d_fire" % player_id
+@onready var _act_grapple: String = "p%d_grapple" % player_id
 
 
 func _ready() -> void:
@@ -90,10 +116,12 @@ func _ready() -> void:
 	add_child(_visuals)
 
 	_setup_stickman()
+	_setup_grapple_visuals()
 
 	if GameManager:
 		GameManager.player_died.connect(_on_player_died)
 		GameManager.game_over.connect(_on_game_over)
+		GameManager.mode_changed.connect(_on_mode_changed_grapple)
 
 
 func _setup_stickman() -> void:
@@ -141,8 +169,14 @@ func _setup_stickman() -> void:
 	gun_grip.points = [Vector2(2, 0), Vector2(4, 6)]
 	var silencer = _make_line(CORE_COLOR, 3.0)
 	silencer.points = [Vector2(10, 0), Vector2(22, 0)]
+	
+	gun_body.reparent(_gun)
+	gun_grip.reparent(_gun)
+	silencer.reparent(_gun)
+
 	var gun_hi = _make_line(Color(0.4, 0.4, 0.4, 0.8), 1.5)
 	gun_hi.points = [Vector2(0, -1), Vector2(8, -1)]
+	gun_hi.reparent(_gun)
 	
 	# Tactical Thigh Pouch
 	_pouch = Polygon2D.new()
@@ -164,6 +198,365 @@ func _make_line(col: Color, w: float) -> Line2D:
 	l.joint_mode = Line2D.LINE_JOINT_ROUND
 	_skeleton.add_child(l)
 	return l
+
+
+func _setup_grapple_visuals() -> void:
+	# P2 Blue is always the armed assassin — THEY never grapple.
+	# P1 Red is always the victim who grapples in 2D.
+	# We check player_id, NOT is_armed(), because is_armed() changes
+	# with dimension swaps and this runs at _ready() time (always 3D at boot).
+	if player_id == 2:
+		return
+
+	# ── Cable ───────────────────────────────────────────────────────────
+	_cable = Line2D.new()
+	_cable.top_level = true
+	_cable.width = 2.5
+	_cable.default_color = GRAPPLE_COLOR
+	_cable.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	_cable.end_cap_mode = Line2D.LINE_CAP_ROUND
+	_cable.z_index = 5
+	_cable.visible = false
+	add_child(_cable)
+
+	# ── Anchor spike ────────────────────────────────────────────────────
+	_spike = Node2D.new()
+	_spike.top_level = true
+	_spike.z_index = 6
+	_spike.visible = false
+	add_child(_spike)
+	var spike_glow := Polygon2D.new()
+	spike_glow.color = Color(GRAPPLE_COLOR.r, GRAPPLE_COLOR.g, GRAPPLE_COLOR.b, 0.35)
+	spike_glow.polygon = _generate_circle(10.0, 16)
+	_spike.add_child(spike_glow)
+	var spike_core := Polygon2D.new()
+	spike_core.color = GRAPPLE_COLOR
+	spike_core.polygon = _generate_circle(3.5, 12)
+	_spike.add_child(spike_core)
+	# Diamond shape around anchor
+	for angle in [0.0, PI * 0.5, PI, PI * 1.5]:
+		var diamond_tick := Line2D.new()
+		diamond_tick.width = 1.5
+		diamond_tick.default_color = GRAPPLE_COLOR
+		var dv := Vector2(cos(angle), sin(angle))
+		diamond_tick.points = [dv * 5.0, dv * 13.0]
+		_spike.add_child(diamond_tick)
+
+	# ── Reticle (tactical crosshair + animated ring) ─────────────────────
+	_reticle = Node2D.new()
+	_reticle.top_level = true
+	_reticle.z_index = 10
+	_reticle.visible = false
+	add_child(_reticle)
+
+	# Outer glow ring (large, semi-transparent)
+	var ring_glow := Line2D.new()
+	ring_glow.name = "ring_glow"
+	ring_glow.width = 4.0
+	ring_glow.default_color = Color(GRAPPLE_COLOR.r, GRAPPLE_COLOR.g, GRAPPLE_COLOR.b, 0.2)
+	ring_glow.closed = true
+	ring_glow.points = _generate_circle(22.0, 32)
+	_reticle.add_child(ring_glow)
+
+	# Middle solid ring
+	var ring_mid := Line2D.new()
+	ring_mid.name = "ring_mid"
+	ring_mid.width = 1.8
+	ring_mid.default_color = GRAPPLE_COLOR
+	ring_mid.closed = true
+	ring_mid.points = _generate_circle(18.0, 32)
+	_reticle.add_child(ring_mid)
+
+	# Inner tight ring
+	var ring_inner := Line2D.new()
+	ring_inner.name = "ring_inner"
+	ring_inner.width = 1.0
+	ring_inner.default_color = Color(GRAPPLE_COLOR.r, GRAPPLE_COLOR.g, GRAPPLE_COLOR.b, 0.6)
+	ring_inner.closed = true
+	ring_inner.points = _generate_circle(8.0, 20)
+	_reticle.add_child(ring_inner)
+
+	# Four crosshair arms (gap in centre)
+	for arm_a in [0.0, PI * 0.5, PI, PI * 1.5]:
+		var arm := Line2D.new()
+		arm.width = 1.5
+		arm.default_color = GRAPPLE_COLOR
+		var dv := Vector2(cos(arm_a), sin(arm_a))
+		arm.points = [dv * 5.0, dv * 22.0]
+		_reticle.add_child(arm)
+
+	# Centre dot
+	var centre := Polygon2D.new()
+	centre.name = "centre_dot"
+	centre.color = GRAPPLE_COLOR
+	centre.polygon = _generate_circle(2.5, 12)
+	_reticle.add_child(centre)
+
+	# Dashed preview line from player to reticle (world-space, top-level)
+	var preview := Line2D.new()
+	preview.name = "preview_line"
+	preview.top_level = true
+	preview.width = 1.2
+	preview.default_color = Color(GRAPPLE_COLOR.r, GRAPPLE_COLOR.g, GRAPPLE_COLOR.b, 0.45)
+	preview.z_index = 8
+	preview.visible = false
+	add_child(preview)
+
+
+# ====================================================================
+# GRAPPLE LOGIC  (P1 Red / victim only)
+# Controls:
+#   F          → open reticle on nearest wall  /  fire when already aiming
+#   Ctrl+WASD  → snap reticle to next wall in that direction
+#   E          → cancel aim OR release mid-traverse (keeps momentum)
+# ====================================================================
+func _handle_grapple(delta: float, input_x: float, input_y: float) -> bool:
+	# Cable is null for P2. Dimension guard stops P1 from grappling in 3D.
+	if _cable == null or _is_dead or _has_won:
+		return false
+	if GameManager and GameManager.is_armed(player_id):
+		# Armed right now (3D mode) — hide visuals, reset state, do nothing.
+		if _grapple_state != GrappleState.OFF:
+			_grapple_state = GrappleState.OFF
+		if _reticle: _reticle.visible = false
+		if _cable:   _cable.visible   = false
+		if _spike:   _spike.visible   = false
+		return false
+
+	# ── F (grapple key) edge-detect ──────────────────────────────────────
+	var grapple_action := _act_grapple
+	if not InputMap.has_action(grapple_action):
+		grapple_action = _act_fire
+	var fire_down    := Input.is_action_pressed(grapple_action)
+	var fire_pressed := fire_down and not _fire_was_down
+	_fire_was_down   = fire_down
+
+	# ── E key edge-detect (bail / cancel) ────────────────────────────────
+	var e_down    := Input.is_key_pressed(KEY_E)
+	var e_pressed := e_down and not _e_was_down
+	_e_was_down   = e_down
+
+	# ── Ctrl held → WASD steers reticle wall-to-wall ─────────────────────
+	var ctrl_held := Input.is_key_pressed(KEY_CTRL)
+
+	match _grapple_state:
+		# ── OFF: press F to open reticle ─────────────────────────────────
+		GrappleState.OFF:
+			if fire_pressed:
+				# If a direction key is held simultaneously with F,
+				# snap the reticle to the nearest wall in that direction.
+				var dir := Vector2(input_x, input_y)
+				if dir.length() > 0.3:
+					var wall_pt := _find_wall_in_direction(dir.normalized())
+					_reticle_pos = wall_pt if wall_pt != Vector2.ZERO else _find_nearest_wall_point()
+				else:
+					# F alone → smart sweep (ceiling preferred).
+					_reticle_pos = _find_nearest_wall_point()
+				_grapple_state = GrappleState.AIMING
+			return false
+
+		# ── AIMING: steer / confirm / cancel ─────────────────────────────
+		GrappleState.AIMING:
+			# F again → fire toward current reticle position.
+			if fire_pressed:
+				_fire_grapple()
+				return false
+
+			# E → cancel aim.
+			if e_pressed:
+				_grapple_state = GrappleState.OFF
+				return false
+
+			# Ctrl + WASD: snap reticle to next wall in that direction.
+			if ctrl_held:
+				var steer := Vector2(input_x, input_y)
+				if steer.length() > 0.3:
+					var wall_pt := _find_wall_in_direction(steer.normalized())
+					if wall_pt != Vector2.ZERO:
+						_reticle_pos = wall_pt
+					return true   # consume movement input this frame
+			return false
+
+		# ── ZIPPING: auto-traverse toward anchor ──────────────────────────
+		GrappleState.ZIPPING:
+			_grapple_t += delta
+			if e_pressed:
+				_release_grapple(true)      # bail: fling away from anchor
+			elif _grapple_t >= grapple_timeout:
+				_release_grapple(false)
+			return false
+
+	return false
+
+
+func _fire_grapple() -> void:
+	# Raycast from the player toward the reticle; attach to the first wall hit.
+	var space := get_world_2d().direct_space_state
+	var aim := (_reticle_pos - global_position)
+	if aim.length() < 1.0:
+		aim = Vector2.UP
+	var to := global_position + aim.normalized() * grapple_range
+	var query := PhysicsRayQueryParameters2D.create(global_position, to)
+	query.exclude = [get_rid()]
+	query.collision_mask = 1   # walls only
+	var hit := space.intersect_ray(query)
+	if hit.is_empty():
+		# Missed — snap back to idle, no anchor.
+		_grapple_state = GrappleState.OFF
+		return
+	_anchor = hit.get("position")
+	_grapple_state = GrappleState.ZIPPING
+	_grapple_t = 0.0
+
+
+func _release_grapple(kick: bool) -> void:
+	if _grapple_state == GrappleState.ZIPPING and kick:
+		# Bail-out fling: nudge away from the anchor so E feels like a dismount.
+		var away := (global_position - _anchor).normalized()
+		if away == Vector2.ZERO:
+			away = Vector2.UP
+		velocity += away * grapple_kick
+	velocity = velocity.limit_length(zip_speed)
+	_grapple_state = GrappleState.OFF
+
+
+func _find_nearest_wall_point() -> Vector2:
+	# Cast rays in 16 directions, then score each hit:
+	#   - Skip anything whose normal points DOWN (floor surface — not a grapple target).
+	#   - Among the rest, prefer the nearest CEILING first, then nearest side-wall.
+	# This stops the reticle from snapping to floor-corners on diagonal rays.
+	var space := get_world_2d().direct_space_state
+	var best  := Vector2.ZERO
+	var best_score := -INF   # higher = better anchor
+
+	for i in range(16):
+		var a   := (float(i) / 16.0) * TAU
+		var dir := Vector2(cos(a), sin(a))
+		var query := PhysicsRayQueryParameters2D.create(
+			global_position, global_position + dir * grapple_range)
+		query.exclude        = [get_rid()]
+		query.collision_mask = 1
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			continue
+
+		var p:      Vector2 = hit["position"]
+		var normal: Vector2 = hit["normal"]
+		var d := global_position.distance_to(p)
+
+		# Skip surfaces the player is already touching (min 55 px).
+		if d < 55.0:
+			continue
+
+		# Skip floor-type surfaces: normal points upward (normal.y < -0.5 = floor).
+		# normal.y < 0 means surface faces UP (= floor in Godot 2D Y-down coords).
+		if normal.y < -0.5:
+			continue
+
+		# Score: ceiling is best (normal faces DOWN = normal.y > 0.5),
+		# side-walls are good (|normal.x| > 0.5), platforms facing up are ok.
+		# Prefer closer hits among same-type surfaces.
+		var type_bonus := 0.0
+		if normal.y > 0.5:            # ceiling — best for grapple up
+			type_bonus = 1000.0
+		elif abs(normal.x) > 0.5:     # left/right wall — good
+			type_bonus = 500.0
+
+		var score := type_bonus - d   # farther = lower score within same type
+		if score > best_score:
+			best_score = score
+			best       = p
+
+	# Fallback: no valid anchor found — aim straight up.
+	if best == Vector2.ZERO:
+		best = global_position + Vector2.UP * (grapple_range * 0.5)
+	return best
+
+
+func _find_wall_in_direction(dir: Vector2) -> Vector2:
+	# Cast a single ray in dir; return the hit point (offset slightly off the surface).
+	# Used by Ctrl+WASD to snap the reticle to the wall face in that direction.
+	var space := get_world_2d().direct_space_state
+	var query := PhysicsRayQueryParameters2D.create(
+		global_position, global_position + dir * grapple_range)
+	query.exclude        = [get_rid()]
+	query.collision_mask = 1
+	var hit := space.intersect_ray(query)
+	if hit.is_empty():
+		return Vector2.ZERO
+	# Pull the anchor point 4 px back from the wall surface so the spike
+	# visually sits on the wall face rather than clipping into it.
+	var normal: Vector2 = hit["normal"]
+	return hit["position"] + normal * 4.0
+
+
+func _update_grapple_visuals() -> void:
+	if _cable == null:
+		return
+	var aiming := _grapple_state == GrappleState.AIMING
+	var zipping := _grapple_state == GrappleState.ZIPPING
+
+	# Preview dashed line while aiming.
+	var preview: Line2D = get_node_or_null("preview_line") as Line2D
+	if preview == null:
+		# Find it among direct children (it's top_level so parented directly).
+		for c in get_children():
+			if c is Line2D and c.name == "preview_line":
+				preview = c
+				break
+
+	# Reticle: show and spin while aiming.
+	_reticle.visible = aiming
+	if aiming:
+		_reticle.global_position = _reticle_pos
+		# Spin the outer glow ring for a radar-sweep feel.
+		_reticle.rotation += get_process_delta_time() * 1.2
+		
+		# Show dashed preview line from hand to reticle.
+		if preview:
+			preview.visible = true
+			var hand_world: Vector2 = global_position
+			if _skeleton:
+				hand_world = _skeleton.to_global(_current_points.get("hand_r", Vector2.ZERO))
+			# Dashed: emit 6-point zigzag between hand and reticle.
+			var seg_count := 12
+			var pts := PackedVector2Array()
+			for i in range(seg_count + 1):
+				var t := float(i) / float(seg_count)
+				var p := hand_world.lerp(_reticle_pos, t)
+				# Tiny perpendicular jitter on odd segments for dashed look.
+				if i % 2 == 1:
+					var perp := (_reticle_pos - hand_world).normalized().rotated(PI * 0.5) * 2.5
+					p += perp
+				pts.append(p)
+			preview.points = pts
+	else:
+		if preview:
+			preview.visible = false
+
+	# Cable + spike only while zipping.
+	_cable.visible = zipping
+	_spike.visible = zipping
+	if zipping:
+		var hand := global_position
+		if _skeleton:
+			hand = _skeleton.to_global(_current_points.get("hand_r", Vector2.ZERO))
+		_cable.points = [hand, _anchor]
+		_spike.global_position = _anchor
+		# Pulse the spike rotation.
+		_spike.rotation += get_process_delta_time() * 3.0
+
+
+func _on_mode_changed_grapple(_is_3d: bool) -> void:
+	# Never let a stale zip resume after a dimension swap.
+	if _grapple_state != GrappleState.OFF:
+		_grapple_state = GrappleState.OFF
+	if _cable:
+		_cable.visible = false
+	if _spike:
+		_spike.visible = false
+	if _reticle:
+		_reticle.visible = false
 
 
 static var _circle_cache: Dictionary = {}
@@ -216,18 +609,35 @@ func _physics_process(delta: float) -> void:
 	var input_y = Input.get_axis(_act_up, _act_down)
 	var is_running := Input.is_key_pressed(KEY_SHIFT) if player_id == 1 else Input.is_key_pressed(KEY_CTRL)
 	var is_crouching := Input.is_action_pressed(_act_down)
-	
+
+	# --- Grapple (victim only): F toggles aim, Ctrl+WASD steers reticle, F fires,
+	# E bails. While steering the reticle, WASD drives it instead of the body. ---
+	var steering_reticle := _handle_grapple(delta, input_x, input_y)
+	if steering_reticle:
+		input_x = 0.0
+		input_y = 0.0
+
 	var current_speed: float = speed * (1.5 if is_running else 1.0)
 	if is_crouching:
 		current_speed = speed * 0.5
-		
-	_determine_state()
-	
+
+	# While zipping, the grapple owns velocity — skip the surface state machine.
+	var zipping := _grapple_state == GrappleState.ZIPPING
+	if not zipping:
+		_determine_state()
+
 	# Apply state-based velocity & visual rotation
 	var target_rotation: float = 0.0
 	var move_intensity: float = 0.0
 
-	if _current_state == MoveState.FLOOR:
+	if zipping:
+		# Cable yanks the player straight toward the anchor, capped at zip_speed.
+		var to_anchor := _anchor - global_position
+		var dir := to_anchor.normalized()
+		velocity = velocity.move_toward(dir * zip_speed, zip_accel * delta)
+		target_rotation = 0.0
+		_current_state = MoveState.GRAPPLE
+	elif _current_state == MoveState.FLOOR:
 		velocity.x = input_x * current_speed
 		velocity.y += gravity * delta
 		target_rotation = 0.0
@@ -282,7 +692,14 @@ func _physics_process(delta: float) -> void:
 		_visuals.rotation = lerp_angle(_visuals.rotation, target_rotation, rotation_speed * delta)
 
 	move_and_slide()
-	
+
+	# Arrival / stuck detection for the zip (position is now updated).
+	if zipping:
+		if global_position.distance_to(_anchor) <= arrival_dist or is_on_wall():
+			_release_grapple(false)   # keep momentum on arrival
+
+	_update_grapple_visuals()
+
 	_update_facing(move_intensity)
 	_animate_stickman(delta, move_intensity, is_running, is_crouching)
 
@@ -301,6 +718,10 @@ func _physics_process(delta: float) -> void:
 			_gun.position = _current_points["hand_r"]
 			var world_angle := (mouse_pos - _gun.global_position).angle()
 			_gun.global_rotation = world_angle
+			if mouse_pos.x < _gun.global_position.x:
+				_gun.scale.y = -1.0
+			else:
+				_gun.scale.y = 1.0
 		else:
 			_gun.visible = false
 
@@ -330,19 +751,24 @@ func _determine_state() -> void:
 func _update_facing(move_dir: float) -> void:
 	if _is_dead:
 		return
-	if GameManager and GameManager.is_armed(player_id):
+		
+	if _current_state == MoveState.GRAPPLE:
+		# Face the anchor during zip — the body rotates to dive toward it.
+		if _anchor != Vector2.ZERO:
+			_facing_right = _anchor.x >= global_position.x
+		return
+	elif _current_state == MoveState.WALL_LEFT:
+		_facing_right = false
+	elif _current_state == MoveState.WALL_RIGHT:
+		_facing_right = true
+	elif GameManager and GameManager.is_armed(player_id):
 		var mouse_pos = get_global_mouse_position()
 		_facing_right = mouse_pos.x > global_position.x
 	else:
-		if _current_state == MoveState.WALL_LEFT:
-			_facing_right = false
-		elif _current_state == MoveState.WALL_RIGHT:
+		if move_dir > 0.1:
 			_facing_right = true
-		else:
-			if move_dir > 0.1:
-				_facing_right = true
-			elif move_dir < -0.1:
-				_facing_right = false
+		elif move_dir < -0.1:
+			_facing_right = false
 
 
 func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouching: bool) -> void:
@@ -357,6 +783,8 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 				state = POSE_WALL_COMBAT_MOVE if abs(move_dir) > 0.1 else POSE_WALL_COMBAT_IDLE
 			else:
 				state = POSE_CLIMB
+		elif _current_state == MoveState.GRAPPLE:
+			state = POSE_GRAPPLE
 		elif _current_state == MoveState.CEILING:
 			state = POSE_MONKEY_BAR
 		elif _current_state == MoveState.AIR:
@@ -425,24 +853,25 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 
 	elif state == POSE_WALL_COMBAT_IDLE or state == POSE_WALL_COMBAT_MOVE:
 		# --- ARMED WALL COMBAT STANCE ---
-		# Character takes cover flat against the wall (+X). Gun aimed outward.
-		const COMBAT_OFFSET = 2.0
+		# Authored for WALL_RIGHT (X > 0 is the wall, so X=14 is touching the wall)
+		# Character faces LEFT (away from wall), back is to the wall (+X).
+		const WALL_X = 14.0
 		
-		# Body is parallel to wall (upright, leaning flat)
-		tp["hip"] = Vector2(COMBAT_OFFSET, -22)
-		tp["neck"] = Vector2(COMBAT_OFFSET + 2, -45)
-		tp["head"] = Vector2(COMBAT_OFFSET + 4, -53)
+		# Body is parallel to wall (upright, back against wall)
+		tp["hip"] = Vector2(WALL_X - 2, -22)
+		tp["neck"] = Vector2(WALL_X - 4, -45) # Leaning slightly away from wall
+		tp["head"] = Vector2(WALL_X - 6, -53)
 		
 		# Top hand supports body flat on wall
-		tp["hand_l"] = Vector2(COMBAT_OFFSET + 8, -60)
-		# Gun hand aims outward (-X? no, mouse drives gun rotation, but default is outward)
-		tp["hand_r"] = Vector2(25, -40)
+		tp["hand_l"] = Vector2(WALL_X, -60)
+		# Gun hand aims outward (-X)
+		tp["hand_r"] = Vector2(WALL_X - 20, -40)
 		
 		var sway = sin(_anim_time * 3.0) * 0.5
 		
 		# Feet planted on wall
-		var foot_high = Vector2(COMBAT_OFFSET, -10)
-		var foot_low  = Vector2(COMBAT_OFFSET, 0)
+		var foot_high = Vector2(WALL_X, -10)
+		var foot_low  = Vector2(WALL_X, 0)
 		
 		if state == POSE_WALL_COMBAT_MOVE:
 			var phase = _anim_time * 1.5
@@ -465,11 +894,11 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 			tp["hip"].y += sway
 			tp["neck"].y += sway * 0.5
 			
-		# Elbows/Knees bend outward away from wall (+X)
-		tp["elbow_l"] = (tp["neck"] + tp["hand_l"]) * 0.5 + Vector2(6, 0)
-		tp["elbow_r"] = (tp["neck"] + tp["hand_r"]) * 0.5 + Vector2(6, 0)
-		tp["knee_l"]  = (tp["hip"] + tp["foot_l"]) * 0.5 + Vector2(15, 0)
-		tp["knee_r"]  = (tp["hip"] + tp["foot_r"]) * 0.5 + Vector2(15, 0)
+		# Elbows/Knees bend outward away from wall (-X)
+		tp["elbow_l"] = (tp["neck"] + tp["hand_l"]) * 0.5 + Vector2(-6, 0)
+		tp["elbow_r"] = (tp["neck"] + tp["hand_r"]) * 0.5 + Vector2(-6, 0)
+		tp["knee_l"]  = (tp["hip"] + tp["foot_l"]) * 0.5 + Vector2(-15, 0)
+		tp["knee_r"]  = (tp["hip"] + tp["foot_r"]) * 0.5 + Vector2(-15, 0)
 
 	elif state == POSE_CLIMB:
 		# --- UNARMED SPIDER CLIMB ---
@@ -539,6 +968,36 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 		tp["hand_r"] = Vector2(15, -55); tp["elbow_r"] = Vector2(5, -45)
 		tp["foot_l"] = Vector2(-15, -15); tp["knee_l"] = Vector2(-20, -20)
 		tp["foot_r"] = Vector2(-5, -5); tp["knee_r"] = Vector2(-10, -15)
+
+	elif state == POSE_GRAPPLE:
+		# Body dives toward anchor — compute local aim vector from _anchor.
+		var aim_local := Vector2(1, -0.3)  # fallback: forward-up
+		if _skeleton and _anchor != Vector2.ZERO:
+			var world_aim := (_anchor - global_position).normalized()
+			# Bring into skeleton-local space (undo world rotation).
+			aim_local = _skeleton.to_local(global_position + world_aim * 40.0)
+			aim_local = aim_local.normalized()
+		
+		# Spine: head leads, hip trails
+		var stretch = clampf(velocity.length() / zip_speed, 0.0, 1.0)
+		tp["neck"] = Vector2(0, -38) + aim_local * 8.0 * stretch
+		tp["head"] = tp["neck"] + aim_local * 10.0
+		tp["hip"]  = Vector2(0, -22) - aim_local * 4.0 * stretch
+		
+		# Both hands reach FORWARD along aim — right hand grips the cable.
+		var reach_r := aim_local * 18.0
+		var reach_l := aim_local * 13.0 + Vector2(0, 4)  # slightly under the cable
+		tp["hand_r"]  = tp["neck"] + reach_r
+		tp["elbow_r"] = tp["neck"] + reach_r * 0.45 + Vector2(0, 5)
+		tp["hand_l"]  = tp["neck"] + reach_l
+		tp["elbow_l"] = tp["neck"] + reach_l * 0.45 + Vector2(0, 7)
+		
+		# Legs tuck behind, knees bent outward for aerodynamic silhouette.
+		var trail := -aim_local
+		tp["foot_r"] = tp["hip"] + trail * 14.0 + Vector2(4, 2)
+		tp["knee_r"] = (tp["hip"] + tp["foot_r"]) * 0.5 + Vector2(10, 6)
+		tp["foot_l"] = tp["hip"] + trail * 14.0 + Vector2(-4, 4)
+		tp["knee_l"] = (tp["hip"] + tp["foot_l"]) * 0.5 + Vector2(-10, 6)
 
 
 	elif state == POSE_DEATH:

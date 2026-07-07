@@ -38,14 +38,25 @@ func _on_mode_changed(is_3d_mode: bool) -> void:
 				0.9,
 				clampf(p1_2d.global_position.y / 32.0, -10.0, 10.0)
 			)
-			p1_3d.velocity = Vector3.ZERO
+			# Carry 2D grapple momentum into 3D so a fast zip flings you into the arena.
+			var v2 := p1_2d.velocity
+			p1_3d.velocity = Vector3(
+				clampf(v2.x / 32.0, -12.0, 12.0),
+				0.0,
+				clampf(v2.y / 32.0, -12.0, 12.0)
+			)
 		if p2_2d and p2_3d:
 			p2_3d.global_position = Vector3(
 				clampf(p2_2d.global_position.x / 32.0, -14.0, 14.0),
 				0.9,
 				clampf(p2_2d.global_position.y / 32.0, -10.0, 10.0)
 			)
-			p2_3d.velocity = Vector3.ZERO
+			var v2b := p2_2d.velocity
+			p2_3d.velocity = Vector3(
+				clampf(v2b.x / 32.0, -12.0, 12.0),
+				0.0,
+				clampf(v2b.y / 32.0, -12.0, 12.0)
+			)
 	else:
 		if p1_3d and p1_2d:
 			p1_2d.global_position = Vector2(

@@ -18,7 +18,7 @@ extends CharacterBody2D
 
 var surface_normal: Vector2 = Vector2.UP
 var _cd: float = 0.0
-var _gun: Line2D
+var _gun: Node2D
 var _was_on_floor := true
 var _recoil_vel := Vector2.ZERO
 
@@ -41,6 +41,8 @@ const POSE_JUMP       := 7
 const POSE_DEATH      := 8
 const POSE_CLIMB      := 9
 const POSE_MONKEY_BAR := 10
+const POSE_WALL_COMBAT_IDLE := 11
+const POSE_WALL_COMBAT_MOVE := 12
 
 # Shadow-warrior silhouette parts: a near-black core with a glowing team-coloured rim.
 var _visuals: Node2D
@@ -54,7 +56,9 @@ var _limb_core: Dictionary = {}     # name -> Line2D (near-black silhouette)
 var _team_color: Color = Color.WHITE
 const CORE_COLOR := Color(0.02, 0.02, 0.05)
 const LIMB_NAMES := ["leg_l", "leg_r", "arm_l", "arm_r", "body"]
-const LIMB_WIDTHS := {"body": 7.0, "arm_l": 4.0, "arm_r": 4.0, "leg_l": 5.0, "leg_r": 5.0}
+const LIMB_WIDTHS := {"body": 12.0, "arm_l": 5.0, "arm_r": 5.0, "leg_l": 6.5, "leg_r": 6.5}
+
+var _pouch: Polygon2D
 
 var _ghost_t: float = 0.0
 
@@ -117,7 +121,7 @@ func _setup_stickman() -> void:
 
 	_head_core = Polygon2D.new()
 	_head_core.color = CORE_COLOR
-	_head_core.polygon = _generate_circle(6.5, 20)
+	_head_core.polygon = _generate_circle(8.0, 20)
 	_skeleton.add_child(_head_core)
 
 	# Faint team-coloured eye so facing still reads on the shadow.
@@ -127,9 +131,24 @@ func _setup_stickman() -> void:
 	_eye.position = Vector2(3, -2)
 	_head_core.add_child(_eye)
 
-	# Gun — bright so the weapon pops against the shadow body.
-	_gun = _make_line(Color(1.0, 0.7, 0.1), 4.0)
-	_gun.points = [Vector2.ZERO, Vector2(20, 0)]
+	# Gun — Tactical Suppressed Pistol
+	_gun = Node2D.new()
+	_skeleton.add_child(_gun)
+	
+	var gun_body = _make_line(CORE_COLOR, 4.0)
+	gun_body.points = [Vector2(0, 0), Vector2(10, 0)]
+	var gun_grip = _make_line(CORE_COLOR, 3.5)
+	gun_grip.points = [Vector2(2, 0), Vector2(4, 6)]
+	var silencer = _make_line(CORE_COLOR, 3.0)
+	silencer.points = [Vector2(10, 0), Vector2(22, 0)]
+	var gun_hi = _make_line(Color(0.4, 0.4, 0.4, 0.8), 1.5)
+	gun_hi.points = [Vector2(0, -1), Vector2(8, -1)]
+	
+	# Tactical Thigh Pouch
+	_pouch = Polygon2D.new()
+	_pouch.color = CORE_COLOR
+	_pouch.polygon = PackedVector2Array([Vector2(-3.5, -4.5), Vector2(3.5, -4.5), Vector2(3.5, 4.5), Vector2(-3.5, 4.5)])
+	_skeleton.add_child(_pouch)
 
 	for n in _pt_names:
 		_current_points[n] = Vector2.ZERO
@@ -226,7 +245,7 @@ func _physics_process(delta: float) -> void:
 		var wall_dir = -1.0 if _current_state == MoveState.WALL_LEFT else 1.0
 		velocity.x = wall_dir * 50.0 
 		
-		target_rotation = PI / 2.0 if _current_state == MoveState.WALL_LEFT else -PI / 2.0
+		target_rotation = 0.0   # spider climb keeps the body upright, facing the wall
 		move_intensity = input_y
 		
 		# Jump off the wall
@@ -279,10 +298,9 @@ func _physics_process(delta: float) -> void:
 		if GameManager and GameManager.is_armed(player_id) and not _is_dead:
 			_gun.visible = true
 			var mouse_pos = get_global_mouse_position()
-			var world_angle := (mouse_pos - global_position).angle()
-			
-			_gun.global_rotation = world_angle
 			_gun.position = _current_points["hand_r"]
+			var world_angle := (mouse_pos - _gun.global_position).angle()
+			_gun.global_rotation = world_angle
 		else:
 			_gun.visible = false
 
@@ -335,13 +353,14 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 		state = POSE_VICTORY
 	else:
 		if _current_state == MoveState.WALL_LEFT or _current_state == MoveState.WALL_RIGHT:
-			state = POSE_CLIMB
+			if GameManager and GameManager.is_armed(player_id):
+				state = POSE_WALL_COMBAT_MOVE if abs(move_dir) > 0.1 else POSE_WALL_COMBAT_IDLE
+			else:
+				state = POSE_CLIMB
 		elif _current_state == MoveState.CEILING:
 			state = POSE_MONKEY_BAR
 		elif _current_state == MoveState.AIR:
 			state = POSE_JUMP
-		elif _is_shooting:
-			state = POSE_COMBAT
 		elif is_crouching and _current_state == MoveState.FLOOR:
 			state = POSE_CROUCH
 		elif abs(move_dir) > 0.1 and is_running:
@@ -351,7 +370,7 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 		else:
 			state = POSE_IDLE
 
-	if state == POSE_WALK or state == POSE_RUN or state == POSE_CLIMB or state == POSE_MONKEY_BAR:
+	if state == POSE_WALK or state == POSE_RUN or state == POSE_CLIMB or state == POSE_MONKEY_BAR or state == POSE_WALL_COMBAT_MOVE:
 		_anim_time += delta * (15.0 if state == POSE_RUN else 8.0)
 	else:
 		_anim_time += delta * 3.0
@@ -367,19 +386,35 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 		tp["knee_r"] = Vector2(4, -15); tp["foot_r"] = Vector2(6, 0)
 
 	elif state == POSE_WALK or state == POSE_RUN:
-		var lean = 12.0 if state == POSE_RUN else 5.0
-		tp["head"] = Vector2(lean, -55); tp["neck"] = Vector2(lean, -45); tp["hip"] = Vector2(lean * 0.5, -25)
-		
 		var s = sin(_anim_time)
 		var c = cos(_anim_time)
-		var stride = 20.0 if state == POSE_RUN else 12.0
-		var lift = 12.0 if state == POSE_RUN else 6.0
 		
-		tp["knee_l"] = Vector2(-s * stride * 0.5, -15 - c * lift * 0.5)
-		tp["foot_l"] = Vector2(-s * stride, -max(0, c) * lift)
+		# Pelvis drops slightly during heel strike/push off, rises slightly at mid-stance.
+		var bounce = -abs(c) * (4.0 if state == POSE_RUN else 2.0)
 		
-		tp["knee_r"] = Vector2(s * stride * 0.5, -15 + c * lift * 0.5)
-		tp["foot_r"] = Vector2(s * stride, -max(0, -c) * lift)
+		# --- Inverted Pendulum Upper Body ---
+		# Walk: Pelvis drives forward (+5), Chest lags behind (+2), Head stabilizes (0)
+		# Run: Body leans into momentum (Hip +4, Neck +8, Head +12)
+		var hip_fwd = 4.0 if state == POSE_RUN else 5.0
+		var neck_fwd = 8.0 if state == POSE_RUN else 2.0
+		var head_fwd = 12.0 if state == POSE_RUN else 0.0
+		
+		# Head/Neck barely bounce, stabilizing vision. Pelvis absorbs the shock.
+		tp["head"] = Vector2(head_fwd, -55)
+		tp["neck"] = Vector2(neck_fwd, -45 - bounce * 0.2)
+		tp["hip"]  = Vector2(hip_fwd, -25 + bounce)
+		
+		var stride = 22.0 if state == POSE_RUN else 14.0
+		var lift = 14.0 if state == POSE_RUN else 8.0
+		
+		# --- Right Leg (s, c) ---
+		tp["foot_r"] = Vector2(s * stride, -max(0, c) * lift)
+		# Knee leads the foot: drives forward during swing (c>0), stays slightly ahead during stance (c<0)
+		tp["knee_r"] = Vector2((s * 0.4 + max(0, c) * 0.4 + 0.15) * stride, -14 - max(0, c) * (lift * 0.8) + max(0, -c) * 3.0)
+		
+		# --- Left Leg (-s, -c) ---
+		tp["foot_l"] = Vector2(-s * stride, -max(0, -c) * lift)
+		tp["knee_l"] = Vector2((-s * 0.4 + max(0, -c) * 0.4 + 0.15) * stride, -14 - max(0, -c) * (lift * 0.8) + max(0, c) * 3.0)
 		
 		var arm_sw = 15.0 if state == POSE_RUN else 8.0
 		tp["elbow_l"] = Vector2(s * arm_sw * 0.6, -35 - abs(c)*2)
@@ -388,42 +423,91 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 		tp["elbow_r"] = Vector2(-s * arm_sw * 0.6, -35 - abs(c)*2)
 		tp["hand_r"] = Vector2(-s * arm_sw, -25 - abs(c)*4)
 
-	elif state == POSE_CLIMB:
-		# Face the wall (+X in local orientation)
-		tp["head"] = Vector2(5, -45); tp["neck"] = Vector2(0, -35); tp["hip"] = Vector2(-5, -20)
-		var is_armed = GameManager and GameManager.is_armed(player_id)
+	elif state == POSE_WALL_COMBAT_IDLE or state == POSE_WALL_COMBAT_MOVE:
+		# --- ARMED WALL COMBAT STANCE ---
+		# Character takes cover flat against the wall (+X). Gun aimed outward.
+		const COMBAT_OFFSET = 2.0
 		
-		if move_dir != 0:
-			var reach = sin(_anim_time * 8.0) * 15.0
-			tp["hand_l"] = Vector2(10, -45 + reach)
-			tp["elbow_l"] = Vector2(5, -40 + reach * 0.5)
+		# Body is parallel to wall (upright, leaning flat)
+		tp["hip"] = Vector2(COMBAT_OFFSET, -22)
+		tp["neck"] = Vector2(COMBAT_OFFSET + 2, -45)
+		tp["head"] = Vector2(COMBAT_OFFSET + 4, -53)
+		
+		# Top hand supports body flat on wall
+		tp["hand_l"] = Vector2(COMBAT_OFFSET + 8, -60)
+		# Gun hand aims outward (-X? no, mouse drives gun rotation, but default is outward)
+		tp["hand_r"] = Vector2(25, -40)
+		
+		var sway = sin(_anim_time * 3.0) * 0.5
+		
+		# Feet planted on wall
+		var foot_high = Vector2(COMBAT_OFFSET, -10)
+		var foot_low  = Vector2(COMBAT_OFFSET, 0)
+		
+		if state == POSE_WALL_COMBAT_MOVE:
+			var phase = _anim_time * 1.5
+			var step = sin(phase)
 			
-			if is_armed:
-				# Hold gun down and swing slightly while climbing
-				tp["hand_r"] = Vector2(5, -20 + sin(_anim_time * 4.0) * 5.0)
-				tp["elbow_r"] = Vector2(0, -25)
+			# Upper body absorbs movement
+			tp["hip"].y += step * 2.0
+			tp["neck"].y += step * 1.0
+			
+			# Thighs reposition (feet step up/down wall)
+			if cos(phase) > 0:
+				tp["foot_l"] = foot_high + Vector2(0, max(0, step) * 12)
+				tp["foot_r"] = foot_low
 			else:
-				tp["hand_r"] = Vector2(10, -45 - reach)
-				tp["elbow_r"] = Vector2(5, -40 - reach * 0.5)
-				
-			tp["foot_l"] = Vector2(8, -10 - reach * 0.8)
-			tp["foot_r"] = Vector2(8, -10 + reach * 0.8)
-			tp["knee_l"] = Vector2(0, -15 - reach * 0.4)
-			tp["knee_r"] = Vector2(0, -15 + reach * 0.4)
+				tp["foot_l"] = foot_high
+				tp["foot_r"] = foot_low + Vector2(0, max(0, -step) * 12)
 		else:
-			tp["hand_l"] = Vector2(12, -45)
-			tp["elbow_l"] = Vector2(5, -40)
+			tp["foot_l"] = foot_high
+			tp["foot_r"] = foot_low
+			tp["hip"].y += sway
+			tp["neck"].y += sway * 0.5
 			
-			if is_armed:
-				# Rest gun hand swinging slightly like holding a heavy gun
-				tp["hand_r"] = Vector2(5, -20 + sin(_anim_time * 2.0) * 2.0)
-				tp["elbow_r"] = Vector2(0, -25)
-			else:
-				tp["hand_r"] = Vector2(12, -35)
-				tp["elbow_r"] = Vector2(5, -30)
-				
-			tp["foot_l"] = Vector2(10, -10); tp["foot_r"] = Vector2(10, 0)
-			tp["knee_l"] = Vector2(2, -15); tp["knee_r"] = Vector2(2, -5)
+		# Elbows/Knees bend outward away from wall (+X)
+		tp["elbow_l"] = (tp["neck"] + tp["hand_l"]) * 0.5 + Vector2(6, 0)
+		tp["elbow_r"] = (tp["neck"] + tp["hand_r"]) * 0.5 + Vector2(6, 0)
+		tp["knee_l"]  = (tp["hip"] + tp["foot_l"]) * 0.5 + Vector2(15, 0)
+		tp["knee_r"]  = (tp["hip"] + tp["foot_r"]) * 0.5 + Vector2(15, 0)
+
+	elif state == POSE_CLIMB:
+		# --- UNARMED SPIDER CLIMB ---
+		# Body stays UPRIGHT and faces the wall (the wall is on the +X side
+		# in this authored frame; the facing-flip mirrors it for a left wall).
+		# Hands reach overhead onto the wall; feet push against it below.
+		# Elbows/knees are always solved BETWEEN their joints so limbs never
+		# fold back into a blob.
+		var reach := sin(_anim_time * 3.0)     # alternates which side reaches high
+		var settle := cos(_anim_time * 3.0)
+
+		# Upright spine, leaning slightly into the wall (+X).
+		tp["hip"]  = Vector2(4, -25)
+		tp["neck"] = Vector2(6, -45)
+		tp["head"] = Vector2(9, -53)
+
+		if move_dir != 0:
+			# Diagonal climbing gait: opposite hand & foot advance together.
+			var hi := 0.5 + reach * 0.5        # 0..1, right side reaches high near 1
+			tp["hand_r"] = Vector2(14, -52 - hi * 12)          # reaches up to -64
+			tp["hand_l"] = Vector2(12, -52 - (1.0 - hi) * 12)
+			tp["foot_r"] = Vector2(11, -4 - (1.0 - hi) * 14)   # foot lifts while its hand plants
+			tp["foot_l"] = Vector2(9, -4 - hi * 14)
+			tp["hip"].y += settle * 1.5        # gentle pull-up bob
+			tp["neck"].y += settle * 1.0
+		else:
+			# Clinging to the wall at rest — slow sway.
+			var sway := sin(_anim_time * 2.0) * 1.5
+			tp["hand_r"] = Vector2(14, -60 + sway)
+			tp["hand_l"] = Vector2(12, -42 - sway)
+			tp["foot_r"] = Vector2(11, -16 + sway)
+			tp["foot_l"] = Vector2(9, -4 - sway)
+
+		# Elbows bend outward, away from the wall (-X); knees bend into it (+X).
+		tp["elbow_r"] = (tp["neck"] + tp["hand_r"]) * 0.5 + Vector2(-6, 0)
+		tp["elbow_l"] = (tp["neck"] + tp["hand_l"]) * 0.5 + Vector2(-6, 0)
+		tp["knee_r"]  = (tp["hip"] + tp["foot_r"]) * 0.5 + Vector2(7, 0)
+		tp["knee_l"]  = (tp["hip"] + tp["foot_l"]) * 0.5 + Vector2(7, 0)
 
 	elif state == POSE_MONKEY_BAR:
 		# Hanging from ceiling
@@ -456,15 +540,6 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 		tp["foot_l"] = Vector2(-15, -15); tp["knee_l"] = Vector2(-20, -20)
 		tp["foot_r"] = Vector2(-5, -5); tp["knee_r"] = Vector2(-10, -15)
 
-	elif state == POSE_COMBAT:
-		tp["head"] = Vector2(5, -50); tp["neck"] = Vector2(0, -40); tp["hip"] = Vector2(-5, -25)
-		# Right arm aims gun forward
-		tp["elbow_r"] = Vector2(5, -35); tp["hand_r"] = Vector2(15, -35)
-		# Left arm supports
-		tp["elbow_l"] = Vector2(-2, -32); tp["hand_l"] = Vector2(8, -35)
-		# Legs braced
-		tp["foot_l"] = Vector2(-15, 0); tp["knee_l"] = Vector2(-15, -15)
-		tp["foot_r"] = Vector2(15, 0); tp["knee_r"] = Vector2(10, -15)
 
 	elif state == POSE_DEATH:
 		tp["head"] = Vector2(15, -5); tp["neck"] = Vector2(5, -3); tp["hip"] = Vector2(-10, -2)
@@ -479,6 +554,50 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 		tp["hand_r"] = Vector2(15, -55); tp["elbow_r"] = Vector2(10, -45)
 		tp["foot_l"] = Vector2(-15, 0); tp["knee_l"] = Vector2(-10, -10)
 		tp["foot_r"] = Vector2(15, 0); tp["knee_r"] = Vector2(10, -10)
+
+	# --- AIM & WEAPON LAYER ---
+	var is_armed = GameManager and GameManager.is_armed(player_id)
+	if is_armed and not _is_dead and not _has_won:
+		var mouse_pos = get_global_mouse_position()
+		# Localize mouse position to the skeleton to respect wall rotations
+		var local_mouse = _skeleton.to_local(mouse_pos)
+		
+		# If facing left, the X coordinates are currently positive and will be flipped later.
+		# Flip the target X so our aim vector calculates correctly on the positive side.
+		if not _facing_right:
+			local_mouse.x *= -1.0
+			
+		var aim_vec = (local_mouse - tp["neck"]).normalized()
+		
+		# Gun Arm (Right Arm) completely independent, pointing at target
+		var arm_len = 24.0
+		var shoulder_pos = tp["neck"] + Vector2(0, 3) # Shoulder down from neck
+		tp["hand_r"] = shoulder_pos + aim_vec * arm_len
+		# Elbow sags slightly due to gravity/bend
+		tp["elbow_r"] = shoulder_pos + aim_vec * (arm_len * 0.4) + Vector2(0, 6)
+		
+		# Head tracks the aim directly
+		var head_look = aim_vec * 6.0
+		tp["head"] = tp["neck"] + Vector2(0, -10) + head_look
+		
+		# Chest rotates slightly into the aim
+		tp["neck"] += aim_vec * 3.0
+		
+		# If standing/crouching, the free hand braces the gun for stability
+		if state == POSE_IDLE or state == POSE_CROUCH:
+			tp["hand_l"] = tp["hand_r"] - aim_vec * 6.0 + Vector2(0, 2)
+			tp["elbow_l"] = shoulder_pos + aim_vec * 8.0 + Vector2(0, 10)
+			
+		# Shooting Chain Reaction (Recoil ripple through body)
+		if _is_shooting:
+			var recoil_dir = -aim_vec
+			var recoil = 6.0
+			tp["hand_r"] += recoil_dir * recoil
+			tp["elbow_r"] += recoil_dir * (recoil * 0.7)
+			tp["neck"] += recoil_dir * (recoil * 0.4)
+			tp["hip"] += recoil_dir * (recoil * 0.2)
+			# Opposite leg compensates slightly
+			tp["foot_l"] += recoil_dir * (recoil * 0.1)
 
 	# Apply Facing Flip — a touch more interpolation for weighted, fluid motion.
 	var flip = -1.0 if not _facing_right else 1.0
@@ -495,6 +614,14 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 	_head_core.position = _current_points["head"]
 	_head_glow.position = _current_points["head"]
 	_head_core.scale.x = flip
+	
+	if _pouch:
+		var hip_pos = _current_points["hip"]
+		var knee_r = _current_points["knee_r"]
+		var thigh_dir = (knee_r - hip_pos).normalized()
+		_pouch.position = hip_pos + thigh_dir * 8.0
+		# Rotate pouch to align with the thigh, plus a slight offset to hang naturally
+		_pouch.rotation = thigh_dir.angle() - PI/2.0
 
 
 

@@ -32,6 +32,17 @@ var _time: float = 0.0
 var _anim_phase: float = 0.0
 var _last_health: float = 100.0
 
+# ── Foot-plant locomotion state ──
+# Stance phase: 0.0 = left foot planted, 1.0 = right foot planted (cycles every 2 steps)
+var _stance_phase: float = 0.0
+# World-space position of each foot target (local to rig)
+var _foot_l_local: Vector3 = Vector3(-0.13, 0.0, 0.0)
+var _foot_r_local: Vector3 = Vector3(0.13, 0.0, 0.0)
+# Step progress: 0=planted, 1=peak swing, cycles 0→1→0
+var _step_l_t: float = 0.0
+var _step_r_t: float = 0.0
+var _step_last_vel: Vector3 = Vector3.ZERO
+
 # ── Procedural rig ──
 var _rig: Node3D
 var _team_color: Color
@@ -56,6 +67,13 @@ func _ready() -> void:
 	_team_color = Color(0.85, 0.15, 0.15) if player_id == 1 else Color(0.2, 0.4, 0.95)
 
 	_build_rig()
+	
+	# Transfer spawn rotation to the visual rig and zero out the physics body.
+	# This ensures local rig rotations always match global aim directions.
+	_visual_yaw = rotation.y
+	if _rig:
+		_rig.rotation.y = _visual_yaw
+	rotation.y = 0
 
 	if GameManager:
 		GameManager.player_died.connect(_on_player_died)
@@ -78,7 +96,7 @@ func _build_rig() -> void:
 	var eye_mat := _mat_rig_emissive(_team_color.lightened(0.5), 2.5)
 
 	# Pelvis (root of animated skeleton), ~0.9m above feet
-	var pelvis := _joint("pelvis", _rig, Vector3(0, 0.9, 0))
+	var pelvis := _joint("pelvis", _rig, Vector3(0, 0.95, 0))
 	_mesh_box(pelvis, Vector3(0.36, 0.16, 0.22), Vector3(0, 0, 0), gear)
 	
 	# Utility Belt / Pouches
@@ -86,19 +104,27 @@ func _build_rig() -> void:
 	_mesh_box(pelvis, Vector3(0.1, 0.12, 0.1), Vector3(0.12, 0.0, -0.12), gear)
 	_mesh_box(pelvis, Vector3(0.1, 0.12, 0.1), Vector3(-0.12, 0.0, -0.12), gear)
 
-	# Torso / chest — tapered look with a box
-	var torso := _joint("torso", pelvis, Vector3(0, 0, 0))
-	_mesh_box(torso, Vector3(0.44, 0.5, 0.24), Vector3(0, 0.28, 0), skin)
+	# Spine (Lower torso)
+	var spine := _joint("spine", pelvis, Vector3(0, 0.08, 0))
+	_mesh_box(spine, Vector3(0.32, 0.22, 0.20), Vector3(0, 0.11, 0), dark)
+
+	# Chest (Upper torso)
+	var torso := _joint("torso", spine, Vector3(0, 0.22, 0))
+	_mesh_box(torso, Vector3(0.44, 0.32, 0.24), Vector3(0, 0.16, 0), skin)
 	
 	# Tactical Backpack
-	_mesh_box(torso, Vector3(0.3, 0.4, 0.15), Vector3(0, 0.25, 0.18), gear)
+	_mesh_box(torso, Vector3(0.3, 0.4, 0.15), Vector3(0, 0.15, 0.18), gear)
 	
 	# Shoulder pads
-	_mesh_sphere(torso, 0.08, Vector3(-0.26, 0.48, 0), dark)
-	_mesh_sphere(torso, 0.08, Vector3(0.26, 0.48, 0), dark)
+	_mesh_sphere(torso, 0.08, Vector3(-0.26, 0.26, 0), dark)
+	_mesh_sphere(torso, 0.08, Vector3(0.26, 0.26, 0), dark)
+
+	# Neck
+	var neck := _joint("neck", torso, Vector3(0, 0.32, 0))
+	_mesh_cyl(neck, 0.06, 0.12, Vector3(0, 0.06, 0), skin)
 
 	# Head
-	var head := _joint("head", torso, Vector3(0, 0.56, 0))
+	var head := _joint("head", neck, Vector3(0, 0.12, 0))
 	_mesh_sphere(head, 0.15, Vector3(0, 0.15, 0), skin)
 	# Visor / face plate
 	_mesh_box(head, Vector3(0.22, 0.08, 0.06), Vector3(0, 0.17, -0.13), gear)
@@ -107,12 +133,12 @@ func _build_rig() -> void:
 	_mesh_sphere(head, 0.025, Vector3(0.06, 0.17, -0.16), eye_mat)
 
 	# Arms (cylindrical limbs)
-	_build_arm("l", torso, Vector3(-0.28, 0.48, 0), dark, gear)
-	_hand_r = _build_arm("r", torso, Vector3(0.28, 0.48, 0), dark, gear)
+	_build_arm("l", torso, Vector3(-0.28, 0.26, 0), dark, gear)
+	_hand_r = _build_arm("r", torso, Vector3(0.28, 0.26, 0), dark, gear)
 
 	# Legs (cylindrical limbs)
-	_build_leg("l", pelvis, Vector3(-0.13, 0, 0), skin, dark)
-	_build_leg("r", pelvis, Vector3(0.13, 0, 0), skin, dark)
+	_build_leg("l", pelvis, Vector3(-0.13, -0.08, 0), skin, dark)
+	_build_leg("r", pelvis, Vector3(0.13, -0.08, 0), skin, dark)
 
 	# Gun for the armed hunter
 	if is_hunter:
@@ -126,6 +152,7 @@ func _build_arm(side: String, torso: Node3D, shoulder_pos: Vector3, limb_mat: St
 	var elbow := _joint("elbow_" + side, shoulder, Vector3(0, -0.3, 0))
 	_mesh_sphere(elbow, 0.04, Vector3.ZERO, joint_mat)
 	_mesh_cyl(elbow, 0.048, 0.28, Vector3(0, -0.14, 0), limb_mat)
+	# Wrist/Hand
 	var hand := _joint("hand_" + side, elbow, Vector3(0, -0.28, 0))
 	# Tactical Glove block
 	_mesh_box(hand, Vector3(0.06, 0.12, 0.08), Vector3(0, -0.06, 0), joint_mat)
@@ -134,13 +161,21 @@ func _build_arm(side: String, torso: Node3D, shoulder_pos: Vector3, limb_mat: St
 
 func _build_leg(side: String, pelvis: Node3D, hip_pos: Vector3, skin: StandardMaterial3D, dark: StandardMaterial3D) -> void:
 	var hip := _joint("hip_" + side, pelvis, hip_pos)
-	_mesh_cyl(hip, 0.07, 0.44, Vector3(0, -0.22, 0), skin)
+	# Upper Leg (Tapered 0.075 -> 0.060)
+	_mesh_taper(hip, 0.075, 0.060, 0.44, Vector3(0, -0.22, 0), skin)
+	_mesh_sphere(hip, 0.075, Vector3.ZERO, skin) # Hip knuckle prevents visible seams
+	
 	# Knee joint ball
 	var knee := _joint("knee_" + side, hip, Vector3(0, -0.44, 0))
-	_mesh_sphere(knee, 0.05, Vector3.ZERO, dark)
-	_mesh_cyl(knee, 0.06, 0.42, Vector3(0, -0.21, 0), dark)
-	# Combat Boot
-	_mesh_box(knee, Vector3(0.12, 0.12, 0.28), Vector3(0, -0.42, -0.05), dark)
+	_mesh_sphere(knee, 0.06, Vector3.ZERO, dark) # Knee knuckle
+	# Lower Leg (Tapered 0.060 -> 0.045)
+	_mesh_taper(knee, 0.060, 0.045, 0.38, Vector3(0, -0.19, 0), dark)
+	
+	# Ankle/Foot
+	var foot := _joint("foot_" + side, knee, Vector3(0, -0.38, 0))
+	_mesh_sphere(foot, 0.045, Vector3.ZERO, dark) # Ankle knuckle
+	# Combat Boot (Lengthened for better silhouette)
+	_mesh_box(foot, Vector3(0.13, 0.11, 0.36), Vector3(0, -0.055, -0.08), dark)
 
 
 func _build_gun(gear: StandardMaterial3D) -> void:
@@ -281,6 +316,17 @@ func _mesh_cyl(parent: Node3D, radius: float, height: float, offset: Vector3, ma
 	mi.position = offset
 	parent.add_child(mi)
 
+func _mesh_taper(parent: Node3D, top_radius: float, bottom_radius: float, height: float, offset: Vector3, mat: StandardMaterial3D) -> void:
+	var mi := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = top_radius
+	cyl.bottom_radius = bottom_radius
+	cyl.height = height
+	cyl.material = mat
+	mi.mesh = cyl
+	mi.position = offset
+	parent.add_child(mi)
+
 
 # ====================================================================
 # MOVEMENT + INPUT
@@ -365,8 +411,15 @@ func _physics_process(delta: float) -> void:
 		
 		# Ensure movement is strictly on the ground plane (ignore camera pitch)
 		cam_forward.y = 0
+		if cam_forward.length_squared() < 0.001:
+			cam_forward = cam_basis.y
+			cam_forward.y = 0
 		cam_forward = cam_forward.normalized()
+		
 		cam_right.y = 0
+		if cam_right.length_squared() < 0.001:
+			cam_right = cam_basis.x
+			cam_right.y = 0
 		cam_right = cam_right.normalized()
 		
 		var is_aiming = GameManager and GameManager.is_armed(player_id) and (Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))
@@ -377,15 +430,17 @@ func _physics_process(delta: float) -> void:
 			var move_dir := (cam_right * input_dir.x + cam_forward * -input_dir.y).normalized()
 			target_vel = move_dir * top_speed
 			
-			# Smooth body turn to movement direction always
-			var target_yaw := atan2(-move_dir.x, -move_dir.z)
-			_visual_yaw = lerp_angle(_visual_yaw, target_yaw, turn_speed * delta)
-			_rig.rotation.y = lerp_angle(_rig.rotation.y, _visual_yaw, 18.0 * delta)
-		elif is_aiming or is_shooting:
-			# If standing still, face aim direction
+		if is_aiming or is_shooting:
+			# If aiming, the entire body stays locked to the crosshair direction.
+			# This enables true strafing and prevents 180-degree spine twist jitter.
 			var target_yaw := atan2(-cam_forward.x, -cam_forward.z)
 			_visual_yaw = lerp_angle(_visual_yaw, target_yaw, 25.0 * delta)
 			_rig.rotation.y = lerp_angle(_rig.rotation.y, _visual_yaw, 25.0 * delta)
+		elif input_dir != Vector2.ZERO:
+			# If not aiming, smoothly turn the body toward the movement direction.
+			var target_yaw := atan2(-target_vel.x, -target_vel.z)
+			_visual_yaw = lerp_angle(_visual_yaw, target_yaw, turn_speed * delta)
+			_rig.rotation.y = lerp_angle(_rig.rotation.y, _visual_yaw, 18.0 * delta)
 
 	# --- Acceleration / deceleration with separate ground vs air curves ---
 	var accel := ACCEL_GROUND if on_floor else ACCEL_AIR
@@ -419,75 +474,116 @@ func _physics_process(delta: float) -> void:
 func _animate(delta: float, moving: bool, running: bool, crouching: bool) -> void:
 	var grounded := is_on_floor()
 
-	# Advance the locomotion phase only while actually striding.
-	if moving and grounded:
-		_anim_phase += delta * (14.0 if running else 9.0)
+	# Phase advances are now done inside _update_foot_plants
 	var s := sin(_anim_phase)
 	var c := cos(_anim_phase)
 
-	# Positional bobbing for the pelvis based on the walk cycle
+	# Pelvis positional bob is now minimal; IK handles the side-shift
 	var target_pelvis_y := 0.9
 	if moving and grounded and not crouching:
-		target_pelvis_y = 0.9 + absf(c) * (0.12 if running else 0.06)
+		# Only subtle knee-absorption dip, NOT a bounce
+		target_pelvis_y = 0.9 - absf(sin(_anim_phase * 2.0)) * (0.04 if running else 0.02)
 	elif crouching:
 		target_pelvis_y = 0.65
 
 	if _joints.has("pelvis"):
 		_joints["pelvis"].position.y = lerpf(_joints["pelvis"].position.y, target_pelvis_y, 12.0 * delta)
 
+	# Advance locomotion phase and update foot-plant targets while moving
+	if moving and grounded and not crouching:
+		_anim_phase += delta * (14.0 if running else 9.0)
+		_update_foot_plants(delta, running)
+	elif not moving:
+		_foot_l_local = _foot_l_local.lerp(Vector3(-0.13, 0.0, 0.0), 6.0 * delta)
+		_foot_r_local = _foot_r_local.lerp(Vector3(0.13, 0.0, 0.0), 6.0 * delta)
+
 	# Default target = rest pose (all joints zeroed).
 	var tp: Dictionary = {}
 	for k in _joints.keys():
 		tp[k] = Vector3.ZERO
-
-	# Base full-body states
-	if _has_won:
-		_pose_victory(tp)
-	elif _hurt_t > 0.0:
-		_pose_hurt(tp)
-	elif not grounded:
-		if velocity.y > 0.0:
-			_pose_jump(tp)
+		
+	if not _is_dead:
+		if _has_won:
+			_pose_victory(tp)
+		elif crouching:
+			_pose_crouch(tp)
+		elif not grounded:
+			if velocity.y > 0:
+				_pose_jump(tp)
+			else:
+				_pose_fall(tp)
+		elif moving:
+			_pose_walk(tp, running)
 		else:
-			_pose_fall(tp)
-	elif crouching:
-		_pose_crouch(tp)
-	elif moving:
-		_pose_walk(tp, s, c, running)
-	else:
-		_pose_idle(tp)
-		
-	# Upper body overrides (GTA 5 Style Aiming)
+			# Reset foot positions smoothly when idle
+			_foot_l_local = _foot_l_local.lerp(Vector3(-0.13, 0.0, 0.0), 0.1)
+			_foot_r_local = _foot_r_local.lerp(Vector3(0.13, 0.0, 0.0), 0.1)
+			_pose_idle(tp)
+	# Layer aiming and shooting on top of the base pose (if armed).
 	var is_aiming = GameManager and GameManager.is_armed(player_id) and (Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))
-	if (is_aiming or _shoot_t > 0.0) and not _has_won and _hurt_t <= 0.0:
-		# Override arms and torso to aim forward
-		tp["torso"] = Vector3(0.05, 0, 0)
-		tp["head"] = Vector3(0.08, 0, 0)
-		tp["shoulder_r"] = Vector3(-PI / 2.0 + 0.1, 0, 0)
-		tp["elbow_r"] = Vector3(-0.12, 0, 0)
-		tp["shoulder_l"] = Vector3(-PI / 2.0 + 0.35, 0, 0.25)
-		tp["elbow_l"] = Vector3(-0.55, 0, 0)
+	
+	# Procedural Breathing & Weapon Sway
+	var sway_x = sin(_time * 1.5) * 0.02
+	var sway_y = cos(_time * 2.1) * 0.02
+	if moving:
+		sway_x += sin(_time * 12.0) * 0.05
+		sway_y += cos(_time * 24.0) * 0.05
 		
-		# Braced stance only if standing still
-		if not moving and grounded and not crouching:
-			tp["hip_l"] = Vector3(-0.2, 0, 0)
-			tp["hip_r"] = Vector3(0.2, 0, 0)
-			tp["knee_l"] = Vector3(0.25, 0, 0)
-			tp["knee_r"] = Vector3(0.2, 0, 0)
-			
-		# Procedural spine twist and pitch tracking
+	# Procedural Recoil Kick
+	var recoil = 0.0
+	if _shoot_t > 0.0:
+		recoil = clampf(_shoot_t / 0.1, 0.0, 1.0)
+		sway_x += randf_range(-0.06, 0.06) * recoil
+		sway_y += recoil * 0.15 # Kick up
+
+	if is_aiming and not _has_won:
 		var cam = get_viewport().get_camera_3d()
 		if cam:
 			var cam_fwd = -cam.global_transform.basis.z
+			# aim_yaw: absolute world direction the camera is looking
 			var aim_yaw = atan2(-cam_fwd.x, -cam_fwd.z)
+			
+			# spine_twist: difference between where rig is facing and where camera is looking
 			var spine_twist = wrapf(aim_yaw - _rig.rotation.y, -PI, PI)
-			var aim_pitch = asin(cam_fwd.y)
 			
-			# Distribute 100% of the twist across pelvis and torso so the gun aligns perfectly
-			tp["pelvis"].y += spine_twist * 0.25
-			tp["torso"].y += spine_twist * 0.75
-			tp["head"].y += spine_twist * 0.2  # Head looks slightly further into the turn
+			# Distributed 100% of the twist across pelvis, spine, and torso
+			tp["pelvis"].y += spine_twist * 0.20
+			tp["spine"].y += spine_twist * 0.35
+			tp["torso"].y += spine_twist * 0.45
+			tp["neck"].y += spine_twist * 0.10 # Head looks slightly further
 			
+		# Override arms, chest, and hands to aim forward with procedural sway and recoil
+		tp["torso"].x += 0.05 - recoil * 0.15
+		tp["torso"].y += sway_x
+		tp["torso"].z += sway_y
+		
+		tp["head"].x += 0.08 - sway_y * 0.5
+		tp["head"].y -= sway_x
+		
+		tp["shoulder_r"] = Vector3(PI / 2.0 - 0.1 + recoil * 0.2, 0, sway_x)
+		tp["elbow_r"] = Vector3(-0.12 - recoil * 0.15, 0, 0)
+		tp["hand_r"] = Vector3(recoil * -0.2, 0, 0) # Wrist snaps back on recoil
+		
+		tp["shoulder_l"] = Vector3(PI / 2.0 - 0.35 + recoil * 0.2, 0, 0.25 + sway_x)
+		tp["elbow_l"] = Vector3(-0.55 - recoil * 0.15, 0, 0)
+		tp["hand_l"] = Vector3(0, 0.1, 0) # Supporting hand tilts
+		
+		# Braced stance only if standing still
+		if not moving and not crouching:
+			tp["hip_l"] = Vector3(0, 0.2, 0.1)
+			tp["hip_r"] = Vector3(0, -0.2, -0.1)
+			tp["knee_l"] = Vector3(0.15, 0, 0)
+			tp["knee_r"] = Vector3(0.15, 0, 0)
+			tp["foot_l"] = Vector3(-0.15, 0, 0)
+			tp["foot_r"] = Vector3(-0.15, 0, 0)
+
+		# Add camera pitch to the arms so they aim up/down
+		if cam:
+			var cam_basis = cam.global_transform.basis
+			var aim_pitch = asin(cam_basis.z.y)
+			tp["spine"].x -= aim_pitch * 0.2
+			tp["torso"].x -= aim_pitch * 0.3
+			tp["neck"].x -= aim_pitch * 0.4
 			tp["head"].x -= aim_pitch * 0.6
 			tp["shoulder_r"].x -= aim_pitch
 			tp["shoulder_l"].x -= aim_pitch
@@ -501,79 +597,193 @@ func _animate(delta: float, moving: bool, running: bool, crouching: bool) -> voi
 
 func _pose_idle(tp: Dictionary) -> void:
 	var breath := sin(_time * 2.0)
+	tp["spine"] = Vector3(0.01 * breath, 0, 0)
 	tp["torso"] = Vector3(0.02 * breath, 0, 0)
-	tp["head"] = Vector3(0.03 * breath, 0, 0)
+	tp["neck"] = Vector3(-0.01 * breath, 0, 0)
+	tp["head"] = Vector3(0.02 * breath, 0, 0)
 	tp["shoulder_l"] = Vector3(0.05, 0, -0.12)   # arms hang slightly out
 	tp["shoulder_r"] = Vector3(0.05, 0, 0.12)
-	tp["elbow_l"] = Vector3(-0.15, 0, 0)
-	tp["elbow_r"] = Vector3(-0.15, 0, 0)
+	tp["elbow_l"] = Vector3(0.15, 0, 0)
+	tp["elbow_r"] = Vector3(0.15, 0, 0)
 
 
-func _pose_walk(tp: Dictionary, s: float, c: float, running: bool) -> void:
-	var stride: float = 1.1 if running else 0.7
-	var lean: float = 0.35 if running else 0.15
-	var arm: float = 0.9 if running else 0.55
+# ── Foot-Plant Controller ────────────────────────────────────────────────────
+# Called every frame while moving. Decides when to lift and place each foot.
+# Updates _foot_l_local / _foot_r_local in rig-local space.
+func _update_foot_plants(delta: float, running: bool) -> void:
+	var local_vel := Vector3.ZERO
+	if _rig:
+		local_vel = _rig.global_transform.basis.inverse() * velocity
 	
-	var s_l = s
-	var c_l = c
-	var s_r = -s
-	var c_r = -c
+	var stride_len := local_vel.length() * (0.28 if running else 0.22)
+	var step_speed := (14.0 if running else 8.0)
+	
+	# The foot target for each leg is one half-stride ahead/behind the pelvis
+	# in the direction of travel.
+	var fwd := local_vel.normalized()
+	var left_target := Vector3(-0.13, 0.0, 0.0) + fwd * (-stride_len * 0.5)
+	var right_target := Vector3(0.13, 0.0, 0.0) + fwd * (stride_len * 0.5)
+	
+	# Advance step progress. Steps alternate via _anim_phase:
+	# Left foot steps when sin(_anim_phase) is rising (0→1 half cycle)
+	# Right foot steps when sin(_anim_phase) is falling (0→-1 half cycle)
+	var s := sin(_anim_phase)
+	_step_l_t = clampf(maxf(0.0, s), 0.0, 1.0)
+	_step_r_t = clampf(maxf(0.0, -s), 0.0, 1.0)
+	
+	# Lerp planted foot toward its target only when that foot is in swing phase
+	if _step_l_t > 0.05:
+		_foot_l_local = _foot_l_local.lerp(left_target, delta * step_speed * _step_l_t)
+	if _step_r_t > 0.05:
+		_foot_r_local = _foot_r_local.lerp(right_target, delta * step_speed * _step_r_t)
 
-	tp["torso"] = Vector3(lean, 0, 0)
-	tp["pelvis"] = Vector3(0, s_l * 0.12, s_l * 0.05) # hip twist and slight roll
-	tp["head"] = Vector3(-lean * 0.6, 0, 0)
 
-	# Left leg
-	tp["hip_l"] = Vector3(s_l * stride, 0, 0)
-	tp["knee_l"] = Vector3(maxf(0.0, c_l) * 1.5, 0, 0) if running else Vector3(maxf(0.0, s_l + 0.2) * 1.2, 0, 0)
+# 2D IK solver: given hip pos, foot pos, and leg length, returns knee position
+# that places the knee forward of the leg line (outward on the Z axis).
+func _solve_leg_ik(hip: Vector3, foot: Vector3, thigh_len: float, shin_len: float, knee_out: float) -> Vector3:
+	var leg_vec := foot - hip
+	var leg_dist := clampf(leg_vec.length(), 0.01, thigh_len + shin_len - 0.01)
+	leg_vec = leg_vec.normalized() * leg_dist
+	
+	# Law of cosines: angle at hip
+	var cos_hip := (leg_dist * leg_dist + thigh_len * thigh_len - shin_len * shin_len) \
+		/ (2.0 * leg_dist * thigh_len)
+	cos_hip = clampf(cos_hip, -1.0, 1.0)
+	var ang_hip := acos(cos_hip)
+	
+	# Knee hint direction: forward and slightly outward
+	var hint := Vector3(0.0, -1.0, knee_out).normalized()
+	var perp := leg_vec.normalized().cross(hint).normalized()
+	perp = perp.cross(leg_vec.normalized()).normalized()
+	
+	return hip + leg_vec.normalized() * thigh_len * cos(ang_hip) + perp * thigh_len * sin(ang_hip)
 
-	# Right leg
-	tp["hip_r"] = Vector3(s_r * stride, 0, 0)
-	tp["knee_r"] = Vector3(maxf(0.0, c_r) * 1.5, 0, 0) if running else Vector3(maxf(0.0, s_r + 0.2) * 1.2, 0, 0)
 
-	# Arms counter-swing the legs.
-	tp["shoulder_l"] = Vector3(s_r * arm, 0, -0.1)
-	tp["shoulder_r"] = Vector3(s_l * arm, 0, 0.1)
-	tp["elbow_l"] = Vector3(-0.5 - maxf(0.0, c_r) * 0.5, 0, 0)
-	tp["elbow_r"] = Vector3(-0.5 - maxf(0.0, c_l) * 0.5, 0, 0)
+func _pose_walk(tp: Dictionary, running: bool) -> void:
+	var local_vel := Vector3.ZERO
+	if _rig:
+		local_vel = _rig.global_transform.basis.inverse() * velocity
+	var spd := local_vel.length()
+	if spd < 0.1: spd = 0.1
+	var fwd_ratio  := clampf(-local_vel.z / spd, -1.0, 1.0)
+	var right_ratio := clampf( local_vel.x / spd, -1.0, 1.0)
+
+	# Total movement influence — legs animate at full rate regardless of direction
+	var move_mag := minf(1.0, absf(fwd_ratio) + absf(right_ratio))
+
+	var s_l := sin(_anim_phase)
+	var c_l := cos(_anim_phase)
+	var s_r := -s_l
+	var c_r := -c_l
+	var stride: float = 1.0 if running else 0.65
+
+	# ── LEGS ──────────────────────────────────────────────────────────────
+	# Hip PITCH (X): forward/back swing — only active when moving forward/back
+	var hip_pitch_l := s_l * stride * fwd_ratio
+	var hip_pitch_r := s_r * stride * fwd_ratio
+
+	# Hip ROLL (Z): sideways swing — active when strafing
+	# Adds lateral step motion so legs don't freeze during strafe
+	var hip_side_l := s_l * stride * right_ratio * 0.7
+	var hip_side_r := s_r * stride * right_ratio * 0.7
+
+	# Knee bends proportional to TOTAL movement, not just forward. Negative to bend backward.
+	var knee_l := -(0.18 + maxf(0.0, c_l) * 0.85 * move_mag)
+	var knee_r := -(0.18 + maxf(0.0, c_r) * 0.85 * move_mag)
+
+	# Ankle: ONLY pitch along forward component.
+	# Multiply by fwd_ratio (signed) so toes go UP when foot is forward,
+	# DOWN on push-off, and stay FLAT when purely strafing — no backwards toe.
+	var ankle_l := (-0.18 * maxf(0.0, s_l) + 0.22 * maxf(0.0, -s_l)) * fwd_ratio
+	var ankle_r := (-0.18 * maxf(0.0, s_r) + 0.22 * maxf(0.0, -s_r)) * fwd_ratio
+
+	# Small knee inward drift during swing
+	var knee_drift_l := s_l * 0.03 * move_mag
+	var knee_drift_r := s_r * 0.03 * move_mag
+
+	tp["hip_l"]  = Vector3(hip_pitch_l, 0.0, hip_side_l)
+	tp["knee_l"] = Vector3(knee_l,      0.0, knee_drift_l)
+	tp["foot_l"] = Vector3(ankle_l,     0.0, 0.0)
+	tp["hip_r"]  = Vector3(hip_pitch_r, 0.0, hip_side_r)
+	tp["knee_r"] = Vector3(knee_r,      0.0, knee_drift_r)
+	tp["foot_r"] = Vector3(ankle_r,     0.0, 0.0)
+
+	# ── PELVIS ────────────────────────────────────────────────────────────
+	var pelvis_twist := s_l * 0.16 * fwd_ratio
+	tp["pelvis"] = Vector3(0.0, pelvis_twist, 0.0)
+
+	# ── SPINE / TORSO counter-rotates ─────────────────────────────────────
+	var spine_twist := -pelvis_twist * 0.75
+	var torso_pitch := 0.07 if running else -0.025
+	tp["spine"] = Vector3(torso_pitch * fwd_ratio * 0.5, spine_twist * 0.4 - right_ratio * 0.04, 0.0)
+	tp["torso"] = Vector3(torso_pitch * fwd_ratio,       spine_twist * 0.6 - right_ratio * 0.04, 0.0)
+
+	# ── HEAD stabilises ───────────────────────────────────────────────────
+	tp["neck"] = Vector3(-torso_pitch * fwd_ratio * 0.6, -spine_twist * 0.35, 0.0)
+	tp["head"] = Vector3(-torso_pitch * fwd_ratio * 0.7, -spine_twist * 0.45, 0.0)
+
+	# ── ARMS with ~12° lag ────────────────────────────────────────────────
+	var s_arm := sin(_anim_phase - 0.21)
+	var arm_swing := 0.85 if running else 0.50
+	tp["shoulder_l"] = Vector3(s_r * arm_swing * fwd_ratio, spine_twist * -0.25, -0.08 - right_ratio * 0.08)
+	tp["shoulder_r"] = Vector3(s_l * arm_swing * fwd_ratio, spine_twist *  0.25,  0.08 - right_ratio * 0.08)
+	tp["elbow_l"] = Vector3(0.42 + maxf(0.0,  s_arm * fwd_ratio) * 0.35, 0.0, 0.0)
+	tp["elbow_r"] = Vector3(0.42 + maxf(0.0, -s_arm * fwd_ratio) * 0.35, 0.0, 0.0)
+	tp["hand_l"]  = Vector3(-0.08, 0.0, 0.0)
+	tp["hand_r"]  = Vector3(-0.08, 0.0, 0.0)
+
+
+
+
 
 
 func _pose_jump(tp: Dictionary) -> void:
-	tp["torso"] = Vector3(0.15, 0, 0)
+	tp["spine"] = Vector3(0.1, 0, 0)
+	tp["torso"] = Vector3(0.05, 0, 0)
 	tp["hip_l"] = Vector3(-0.55, 0, 0.05)
 	tp["hip_r"] = Vector3(-0.55, 0, -0.05)
-	tp["knee_l"] = Vector3(0.9, 0, 0)
-	tp["knee_r"] = Vector3(0.9, 0, 0)
+	tp["knee_l"] = Vector3(-0.9, 0, 0)
+	tp["knee_r"] = Vector3(-0.9, 0, 0)
+	tp["foot_l"] = Vector3(0.2, 0, 0)
+	tp["foot_r"] = Vector3(0.2, 0, 0)
 	tp["shoulder_l"] = Vector3(-1.2, 0, -0.35)
 	tp["shoulder_r"] = Vector3(-1.2, 0, 0.35)
-	tp["elbow_l"] = Vector3(-0.5, 0, 0)
-	tp["elbow_r"] = Vector3(-0.5, 0, 0)
+	tp["elbow_l"] = Vector3(0.5, 0, 0)
+	tp["elbow_r"] = Vector3(0.5, 0, 0)
 
 
 func _pose_fall(tp: Dictionary) -> void:
-	tp["torso"] = Vector3(-0.1, 0, 0)
-	tp["head"] = Vector3(0.15, 0, 0)
+	tp["spine"] = Vector3(-0.05, 0, 0)
+	tp["torso"] = Vector3(-0.05, 0, 0)
+	tp["neck"] = Vector3(0.1, 0, 0)
+	tp["head"] = Vector3(0.1, 0, 0)
 	tp["hip_l"] = Vector3(-0.2, 0, 0.1)
 	tp["hip_r"] = Vector3(-0.2, 0, -0.1)
-	tp["knee_l"] = Vector3(0.3, 0, 0)
-	tp["knee_r"] = Vector3(0.3, 0, 0)
+	tp["knee_l"] = Vector3(-0.3, 0, 0)
+	tp["knee_r"] = Vector3(-0.3, 0, 0)
+	tp["foot_l"] = Vector3(-0.1, 0, 0)
+	tp["foot_r"] = Vector3(-0.1, 0, 0)
 	tp["shoulder_l"] = Vector3(-0.3, 0, -0.6)
 	tp["shoulder_r"] = Vector3(-0.3, 0, 0.6)
-	tp["elbow_l"] = Vector3(-0.3, 0, 0)
-	tp["elbow_r"] = Vector3(-0.3, 0, 0)
+	tp["elbow_l"] = Vector3(0.3, 0, 0)
+	tp["elbow_r"] = Vector3(0.3, 0, 0)
 
 
 func _pose_crouch(tp: Dictionary) -> void:
-	tp["torso"] = Vector3(0.35, 0, 0)
-	tp["head"] = Vector3(-0.2, 0, 0)
+	tp["spine"] = Vector3(0.2, 0, 0)
+	tp["torso"] = Vector3(0.15, 0, 0)
+	tp["neck"] = Vector3(-0.1, 0, 0)
+	tp["head"] = Vector3(-0.15, 0, 0)
 	tp["hip_l"] = Vector3(0.6, 0, -0.15)
 	tp["hip_r"] = Vector3(0.6, 0, 0.15)
-	tp["knee_l"] = Vector3(0.9, 0, 0)
-	tp["knee_r"] = Vector3(0.9, 0, 0)
+	tp["knee_l"] = Vector3(-0.9, 0, 0)
+	tp["knee_r"] = Vector3(-0.9, 0, 0)
+	tp["foot_l"] = Vector3(-0.3, 0, 0)
+	tp["foot_r"] = Vector3(-0.3, 0, 0)
 	tp["shoulder_l"] = Vector3(-0.3, 0, -0.15)
 	tp["shoulder_r"] = Vector3(-0.3, 0, 0.15)
-	tp["elbow_l"] = Vector3(-0.6, 0, 0)
-	tp["elbow_r"] = Vector3(-0.6, 0, 0)
+	tp["elbow_l"] = Vector3(0.6, 0, 0)
+	tp["elbow_r"] = Vector3(0.6, 0, 0)
 
 
 func _pose_hurt(tp: Dictionary) -> void:
@@ -582,10 +792,10 @@ func _pose_hurt(tp: Dictionary) -> void:
 	tp["head"] = Vector3(-0.3, 0.2, 0)
 	tp["shoulder_l"] = Vector3(-0.2, 0, -0.5)
 	tp["shoulder_r"] = Vector3(-0.2, 0, 0.5)
-	tp["elbow_l"] = Vector3(-0.7, 0, 0)
-	tp["elbow_r"] = Vector3(-0.7, 0, 0)
+	tp["elbow_l"] = Vector3(0.7, 0, 0)
+	tp["elbow_r"] = Vector3(0.7, 0, 0)
 	tp["hip_l"] = Vector3(-0.15, 0, 0)
-	tp["knee_l"] = Vector3(0.25, 0, 0)
+	tp["knee_l"] = Vector3(-0.25, 0, 0)
 
 
 func _pose_victory(tp: Dictionary) -> void:
@@ -593,8 +803,8 @@ func _pose_victory(tp: Dictionary) -> void:
 	tp["head"] = Vector3(-0.12, 0, 0)
 	tp["shoulder_l"] = Vector3(-2.7, 0, -0.25)   # arms thrust overhead
 	tp["shoulder_r"] = Vector3(-2.7, 0, 0.25)
-	tp["elbow_l"] = Vector3(-0.4, 0, 0)
-	tp["elbow_r"] = Vector3(-0.4, 0, 0)
+	tp["elbow_l"] = Vector3(0.4, 0, 0)
+	tp["elbow_r"] = Vector3(0.4, 0, 0)
 
 
 # ====================================================================
@@ -704,7 +914,8 @@ func _fire() -> void:
 		var flat_dir = (target_pos - global_position)
 		flat_dir.y = 0
 		if flat_dir.length_squared() > 0.01:
-			rotation.y = atan2(-flat_dir.x, -flat_dir.z)
+			_visual_yaw = atan2(-flat_dir.x, -flat_dir.z)
+			_rig.rotation.y = _visual_yaw
 
 	# Trace from the muzzle to (slightly past) the crosshair target.
 	var aim_dir = (target_pos - muzzle_pos).normalized()

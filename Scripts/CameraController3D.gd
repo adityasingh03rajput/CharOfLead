@@ -192,7 +192,10 @@ func _process(delta: float) -> void:
 	var look_dir = (look_point - global_position).normalized()
 	var up_vec = Vector3.UP
 	if abs(look_dir.y) > 0.99:
-		up_vec = Vector3.RIGHT
+		# Use the orbital yaw to establish the 'up' direction to prevent 90-degree camera roll
+		up_vec = Vector3(-sin(_yaw), 0, -cos(_yaw))
+		if up_vec.length_squared() < 0.01:
+			up_vec = Vector3.FORWARD
 		
 	look_at(look_point, up_vec)
 

@@ -51,11 +51,19 @@ var _current_preset: int = Preset.THIRD_PERSON
 var _target_pitch: float = -25.0
 var _target_distance: float = 10.0
 
+# New variables for auto-orbit stability
+var _auto_orbit_angle: float = 0.0
+var _is_auto_orbiting: bool = false
+var _last_mouse_time: float = 0.0
+
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	fov = default_fov
+	near = 0.01
 	_apply_preset(_current_preset)
+	if target:
+		_yaw = target.rotation.y  # Initialize to match player facing
 
 
 func _apply_preset(idx: int) -> void:
@@ -88,12 +96,20 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_camera"):
 		_current_preset = (_current_preset + 1) % 4
 		_apply_preset(_current_preset)
+		if _current_preset == Preset.BIRDS_EYE:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		else:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
-	# Mouse movement rotates the orbit
-	if event is InputEventMouseMotion:
+	# Mouse movement rotates the orbit (only if captured)
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		_yaw -= event.relative.x * mouse_sensitivity
 		_target_pitch -= event.relative.y * mouse_sensitivity * 60.0
 		_target_pitch = clampf(_target_pitch, min_pitch, max_pitch)
+		
+		# Reset auto-orbit when mouse moves
+		_is_auto_orbiting = false
+		_last_mouse_time = Time.get_ticks_msec() / 1000.0
 
 	# Scroll wheel zooms in/out
 	if event is InputEventMouseButton:
@@ -108,7 +124,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		pass
 
 
-func _process(delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	if not is_instance_valid(target):
 		return
 		
@@ -130,21 +146,49 @@ func _process(delta: float) -> void:
 	# Free Fire aim-down-sights: hold Right Mouse (via action map if available)
 	var ads_input = Input.is_action_pressed("p2_fire") or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	_ads = third_person and ads_input
+
+	# IMPROVED: Auto-orbit with mouse input detection
+	if third_person and not _ads:
+		var dist_to_target := (global_position - target.global_position).length()
+		var current_time := Time.get_ticks_msec() / 1000.0
+		var time_since_mouse := current_time - _last_mouse_time
+		
+		# Only auto-orbit if mouse hasn't been moved recently and character is very close
+		if dist_to_target < 2.5 and time_since_mouse > 0.1:
+			_is_auto_orbiting = true
+			var target_yaw = target.rotation.y
+			
+			# Check if we need to orbit (more than 30 degree difference)
+			var angle_diff = abs(angle_difference(_yaw, target_yaw))
+			if angle_diff > 0.3:
+				# Smooth but controlled rotation
+				var speed = clampf(10.0 * (1.0 - (dist_to_target / 3.0)), 2.0, 8.0)
+				_yaw = lerp_angle(_yaw, target_yaw, speed * delta)
+			else:
+				_yaw = target_yaw
+				_is_auto_orbiting = false
+		else:
+			_is_auto_orbiting = false
 	
 	var target_fov = ads_fov if _ads else default_fov
 	if abs(fov - target_fov) > 0.1:
 		fov = lerpf(fov, target_fov, fov_speed * delta)
 		
-	var eff_distance: float = ads_distance if _ads else distance
+	# Use different distance for ADS vs normal
+	var eff_distance: float
+	if third_person:
+		eff_distance = maxf(ads_distance if _ads else distance, min_distance)
+	else:
+		eff_distance = 0.4  # First person
 
 	# The point we orbit around (player position + height offset)
 	var look_point := target.global_position + Vector3.UP * height_offset
 
 	# Over-the-shoulder framing: shift the pivot along the camera's right axis
-	# so the player sits to one side and the crosshair centre stays clear.
 	if third_person:
 		var shoulder_amt: float = ads_shoulder if _ads else shoulder_offset
-		look_point += global_transform.basis.x * shoulder_amt
+		var camera_right := Vector3(cos(_yaw), 0.0, -sin(_yaw)).normalized()
+		look_point += camera_right * shoulder_amt
 
 	# Calculate desired camera position from yaw/pitch/distance
 	var pitch_rad := deg_to_rad(_pitch)
@@ -167,13 +211,23 @@ func _process(delta: float) -> void:
 		
 		var space := get_world_3d().direct_space_state
 		var query := PhysicsRayQueryParameters3D.create(look_point, desired_pos)
+		query.hit_from_inside = true
 		var hit := space.intersect_ray(query)
 		if not hit.is_empty():
 			desired_pos = hit.get("position")
 	else:
-		# Raycast to prevent clipping through walls in third-person modes
+		# IMPROVED: Raycast with better collision resolution
 		var space := get_world_3d().direct_space_state
-		var query := PhysicsRayQueryParameters3D.create(look_point, desired_pos)
+		
+		# Use a shorter ray if we're auto-orbiting to prevent bouncing
+		var ray_end = desired_pos
+		if _is_auto_orbiting:
+			# Temporarily reduce distance for auto-orbit to prevent jitter
+			var temp_distance = lerp(eff_distance, eff_distance * 0.7, 0.5)
+			ray_end = look_point + (desired_pos - look_point).normalized() * temp_distance
+		
+		var query := PhysicsRayQueryParameters3D.create(look_point, ray_end)
+		query.hit_from_inside = true
 		
 		var excludes = []
 		var all_players = get_tree().get_nodes_in_group("p1_body_3d") + get_tree().get_nodes_in_group("p2_body_3d")
@@ -184,15 +238,41 @@ func _process(delta: float) -> void:
 		
 		var hit := space.intersect_ray(query)
 		if not hit.is_empty():
-			desired_pos = hit.get("position") + (look_point - hit.get("position")).normalized() * 0.4
+			# Push camera away from wall with better offset
+			var hit_pos: Vector3 = hit.get("position")
+			var dir_from_wall := (hit_pos - look_point).normalized()
+			
+			# Larger offset to prevent camera from pushing through walls
+			desired_pos = hit_pos + dir_from_wall * 0.5
+			
+			# Ensure we don't go below minimum distance
+			var actual_dist = (desired_pos - look_point).length()
+			if actual_dist < min_distance * 0.5:
+				desired_pos = look_point + dir_from_wall * min_distance * 0.5
+		elif _is_auto_orbiting:
+			# If no wall hit during auto-orbit, ensure smooth transition
+			var center_dir = (desired_pos - look_point).normalized()
+			desired_pos = look_point + center_dir * min(eff_distance, distance * 0.9)
 
-	# Smoothly follow
-	global_position = global_position.lerp(desired_pos, follow_speed * delta)
+	# IMPROVED: Smoother following with different speeds for different situations
+	var follow_speed_multiplier = 1.0
+	if _is_auto_orbiting:
+		# Faster follow during auto-orbit to keep up with player
+		follow_speed_multiplier = 1.5
+	
+	var current_speed = follow_speed * follow_speed_multiplier
+	
+	# Limit maximum movement per frame to prevent teleporting
+	var max_move = distance * 2.0 * delta
+	var movement = desired_pos - global_position
+	if movement.length() > max_move:
+		movement = movement.normalized() * max_move
+	
+	global_position += movement
 	
 	var look_dir = (look_point - global_position).normalized()
 	var up_vec = Vector3.UP
 	if abs(look_dir.y) > 0.99:
-		# Use the orbital yaw to establish the 'up' direction to prevent 90-degree camera roll
 		up_vec = Vector3(-sin(_yaw), 0, -cos(_yaw))
 		if up_vec.length_squared() < 0.01:
 			up_vec = Vector3.FORWARD
@@ -200,3 +280,11 @@ func _process(delta: float) -> void:
 	look_at(look_point, up_vec)
 
 
+# Helper function for angle difference
+static func angle_difference(from: float, to: float) -> float:
+	var diff = fmod(to - from, PI * 2)
+	if diff > PI:
+		diff -= PI * 2
+	elif diff < -PI:
+		diff += PI * 2
+	return abs(diff)

@@ -43,6 +43,13 @@ var _step_l_t: float = 0.0
 var _step_r_t: float = 0.0
 var _step_last_vel: Vector3 = Vector3.ZERO
 
+# ── Body-Hopping (P2 Ability) ──
+var is_idle_clone: bool = false
+var clone_number: int = 0
+static var active_clones: Array = []
+static var clone_counter: int = 0
+var _selector_ui: CanvasLayer
+
 # ── Procedural rig ──
 var _rig: Node3D
 var _team_color: Color
@@ -75,11 +82,26 @@ func _ready() -> void:
 		_rig.rotation.y = _visual_yaw
 	rotation.y = 0
 
-	if GameManager:
-		GameManager.player_died.connect(_on_player_died)
-		GameManager.game_over.connect(_on_game_over)
-		GameManager.health_changed.connect(_on_health_changed)
-		_last_health = GameManager.get_health(player_id)
+	if not is_idle_clone:
+		if GameManager:
+			GameManager.player_died.connect(_on_player_died)
+			GameManager.game_over.connect(_on_game_over)
+			GameManager.health_changed.connect(_on_health_changed)
+			_last_health = GameManager.get_health(player_id)
+		if player_id == 2:
+			active_clones.clear()
+			clone_counter = 0
+			_build_selector_ui()
+	else:
+		var lbl = Label3D.new()
+		lbl.text = str(clone_number)
+		lbl.pixel_size = 0.015
+		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lbl.position = Vector3(0, 2.2, 0)
+		lbl.modulate = Color.WHITE
+		lbl.outline_modulate = Color.BLACK
+		lbl.font_size = 100
+		add_child(lbl)
 
 
 # ====================================================================
@@ -355,6 +377,40 @@ func _physics_process(delta: float) -> void:
 	if _hurt_t > 0.0:  _hurt_t -= delta
 
 	var on_floor := is_on_floor()
+	
+	# --- Body Hopping Selector ---
+	if player_id == 2 and not is_idle_clone and not _is_dead and GameManager and not GameManager.is_armed(2):
+		if Input.is_physical_key_pressed(KEY_Q):
+			if _selector_ui and not _selector_ui.visible:
+				_selector_ui.visible = true
+				Engine.time_scale = 0.1
+			for i in range(1, 10):
+				if Input.is_physical_key_pressed(KEY_0 + i):
+					_try_body_hop(i)
+					break
+		else:
+			if _selector_ui and _selector_ui.visible:
+				_selector_ui.visible = false
+				Engine.time_scale = 1.0
+
+	# --- Idle Clone Behavior ---
+	if is_idle_clone:
+		if not on_floor:
+			velocity.y = maxf(velocity.y - gravity * delta, -40.0)
+		else:
+			velocity.y = 0.0
+		velocity.x = 0.0
+		velocity.z = 0.0
+		move_and_slide()
+		
+		var tp: Dictionary = {}
+		for k in _joints.keys(): tp[k] = Vector3.ZERO
+		_pose_idle(tp)
+		var rate: float = clampf(11.0 * delta, 0.0, 1.0)
+		for k in _joints.keys():
+			var j: Node3D = _joints[k]
+			j.rotation = j.rotation.lerp(tp[k], rate)
+		return
 
 	# --- Coyote time: keep a grace window after stepping off a ledge ---
 	if on_floor:
@@ -1044,4 +1100,116 @@ func _draw_tracer_3d(start: Vector3, end: Vector3) -> void:
 	var tween := create_tween()
 	tween.tween_property(mesh_inst, "global_position", end, travel_time)
 	tween.tween_callback(mesh_inst.queue_free)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _is_dead or is_idle_clone or player_id != 2 or not GameManager or GameManager.is_armed(2):
+		return
+		
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var cam = get_viewport().get_camera_3d()
+		if cam and cam.get("_current_preset") == 1: # BIRDS_EYE
+			var mpos = event.position
+			var from = cam.project_ray_origin(mpos)
+			var to = from + cam.project_ray_normal(mpos) * 1000.0
+			var space = get_world_3d().direct_space_state
+			var q = PhysicsRayQueryParameters3D.create(from, to)
+			q.collision_mask = 1 # Environment only
+			var hit = space.intersect_ray(q)
+			if not hit.is_empty():
+				_implant_clone(hit.get("position"))
+
+# ====================================================================
+# BODY HOPPING (P2 Ability)
+# ====================================================================
+func _build_selector_ui() -> void:
+	_selector_ui = CanvasLayer.new()
+	var bg = ColorRect.new()
+	bg.color = Color(0,0,0,0.4)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_selector_ui.add_child(bg)
+	var lbl = Label.new()
+	lbl.text = "HOLD [Q] AND PRESS [1-9] TO HOP"
+	lbl.set_anchors_preset(Control.PRESET_CENTER)
+	lbl.add_theme_font_size_override("font_size", 42)
+	_selector_ui.add_child(lbl)
+	_selector_ui.visible = false
+	add_child(_selector_ui)
+
+func _implant_clone(pos: Vector3) -> void:
+	if active_clones.size() >= 5:
+		return
+	var script = load("res://Scripts/Player3D.gd") as GDScript
+	var clone = CharacterBody3D.new()
+	clone.set_script(script)
+	clone.set("player_id", 2)
+	clone.set("is_hunter", false)
+	clone.position = pos
+	clone.set("is_idle_clone", true)
+	
+	clone.collision_layer = 2
+	clone.collision_mask = 3
+	var cs = CollisionShape3D.new()
+	var cap = CapsuleShape3D.new()
+	cap.radius = 0.25
+	cap.height = 1.8
+	cs.shape = cap
+	cs.position = Vector3(0, 0.9, 0)
+	clone.add_child(cs)
+	
+	clone_counter += 1
+	clone.set("clone_number", clone_counter)
+	
+	get_parent().add_child(clone)
+	active_clones.append(clone)
+
+func _try_body_hop(cnum: int) -> void:
+	var target_clone = null
+	for c in active_clones:
+		if c.get("clone_number") == cnum and is_instance_valid(c):
+			target_clone = c
+			break
+			
+	if not target_clone:
+		return
+		
+	# Check LOS from Red
+	var red_player = null
+	for p in get_tree().get_nodes_in_group("p1_body_3d"):
+		if p != self and p != target_clone:
+			red_player = p
+			break
+			
+	if red_player:
+		var space = get_world_3d().direct_space_state
+		var q = PhysicsRayQueryParameters3D.create(red_player.global_position + Vector3.UP * 1.5, self.global_position + Vector3.UP * 0.9)
+		q.exclude = [red_player.get_rid(), self.get_rid(), target_clone.get_rid()]
+		var hit = space.intersect_ray(q)
+		if hit.is_empty():
+			return # Unsafe! Red can see the REAL PLAYER (self)!
+			
+	# Hop successful!
+	target_clone.set("is_idle_clone", false)
+	for child in target_clone.get_children():
+		if child is Label3D:
+			child.queue_free()
+			
+	active_clones.erase(target_clone)
+	
+	# Old body dies (corpse)
+	self.set("is_idle_clone", true) # Prevent input processing
+	_on_player_died(player_id)
+	
+	var cam = get_viewport().get_camera_3d()
+	if cam:
+		cam.set("target", target_clone)
+		
+	if _selector_ui:
+		_selector_ui.visible = false
+	Engine.time_scale = 1.0
+
+	if GameManager:
+		GameManager.player_died.connect(target_clone._on_player_died)
+		GameManager.game_over.connect(target_clone._on_game_over)
+		GameManager.health_changed.connect(target_clone._on_health_changed)
 

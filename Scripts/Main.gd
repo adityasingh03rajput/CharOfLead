@@ -34,9 +34,9 @@ func _on_mode_changed(is_3d_mode: bool) -> void:
 	if is_3d_mode:
 		if p1_2d and p1_3d:
 			p1_3d.global_position = Vector3(
-				clampf(p1_2d.global_position.x / 32.0, -14.0, 14.0),
+				clampf(p1_2d.global_position.x / 32.0, -11.5, 11.5),
 				0.9,
-				clampf(p1_2d.global_position.y / 32.0, -10.0, 10.0)
+				clampf(p1_2d.global_position.y / 32.0, -11.5, 11.5)
 			)
 			# Carry 2D grapple momentum into 3D so a fast zip flings you into the arena.
 			var v2 := p1_2d.velocity
@@ -47,9 +47,9 @@ func _on_mode_changed(is_3d_mode: bool) -> void:
 			)
 		if p2_2d and p2_3d:
 			p2_3d.global_position = Vector3(
-				clampf(p2_2d.global_position.x / 32.0, -14.0, 14.0),
+				clampf(p2_2d.global_position.x / 32.0, -11.5, 11.5),
 				0.9,
-				clampf(p2_2d.global_position.y / 32.0, -10.0, 10.0)
+				clampf(p2_2d.global_position.y / 32.0, -11.5, 11.5)
 			)
 			var v2b := p2_2d.velocity
 			p2_3d.velocity = Vector3(
@@ -60,14 +60,14 @@ func _on_mode_changed(is_3d_mode: bool) -> void:
 	else:
 		if p1_3d and p1_2d:
 			p1_2d.global_position = Vector2(
-				clampf(p1_3d.global_position.x * 32.0, -448.0, 448.0),
-				clampf(p1_3d.global_position.z * 32.0, -320.0, 320.0)
+				clampf(p1_3d.global_position.x * 32.0, -410.0, 410.0),
+				clampf(p1_3d.global_position.z * 32.0, -280.0, 280.0)
 			)
 			p1_2d.velocity = Vector2.ZERO
 		if p2_3d and p2_2d:
 			p2_2d.global_position = Vector2(
-				clampf(p2_3d.global_position.x * 32.0, -448.0, 448.0),
-				clampf(p2_3d.global_position.z * 32.0, -320.0, 320.0)
+				clampf(p2_3d.global_position.x * 32.0, -410.0, 410.0),
+				clampf(p2_3d.global_position.z * 32.0, -280.0, 280.0)
 			)
 			p2_2d.velocity = Vector2.ZERO
 
@@ -87,7 +87,6 @@ func _on_mode_changed(is_3d_mode: bool) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		if _hud_crosshair:
 			_hud_crosshair.visible = false
-
 
 # ====================================================================
 # 3D ENVIRONMENT
@@ -201,7 +200,7 @@ func _build_3d_environment() -> void:
 	cam.position = Vector3(0, 18, 12)
 	cam.rotation_degrees = Vector3(-58, 0, 0)
 	cam.set_script(cam_script)
-	cam.set("target", p1_3d)
+	cam.set("target", p2_3d)
 	env_3d.add_child(cam)
 
 

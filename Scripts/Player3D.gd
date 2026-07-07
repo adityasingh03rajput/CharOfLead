@@ -363,6 +363,12 @@ func _physics_process(delta: float) -> void:
 		var cam_forward: Vector3 = -cam_basis.z
 		var cam_right: Vector3 = cam_basis.x
 		
+		# Ensure movement is strictly on the ground plane (ignore camera pitch)
+		cam_forward.y = 0
+		cam_forward = cam_forward.normalized()
+		cam_right.y = 0
+		cam_right = cam_right.normalized()
+		
 		var is_aiming = GameManager and GameManager.is_armed(player_id) and (Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))
 		var is_shooting = _shoot_t > 0.0
 		
@@ -440,7 +446,10 @@ func _animate(delta: float, moving: bool, running: bool, crouching: bool) -> voi
 	elif _hurt_t > 0.0:
 		_pose_hurt(tp)
 	elif not grounded:
-		_pose_jump(tp)
+		if velocity.y > 0.0:
+			_pose_jump(tp)
+		else:
+			_pose_fall(tp)
 	elif crouching:
 		_pose_crouch(tp)
 	elif moving:
@@ -535,10 +544,23 @@ func _pose_jump(tp: Dictionary) -> void:
 	tp["hip_r"] = Vector3(-0.55, 0, -0.05)
 	tp["knee_l"] = Vector3(0.9, 0, 0)
 	tp["knee_r"] = Vector3(0.9, 0, 0)
-	tp["shoulder_l"] = Vector3(-0.7, 0, -0.35)
-	tp["shoulder_r"] = Vector3(-0.7, 0, 0.35)
+	tp["shoulder_l"] = Vector3(-1.2, 0, -0.35)
+	tp["shoulder_r"] = Vector3(-1.2, 0, 0.35)
 	tp["elbow_l"] = Vector3(-0.5, 0, 0)
 	tp["elbow_r"] = Vector3(-0.5, 0, 0)
+
+
+func _pose_fall(tp: Dictionary) -> void:
+	tp["torso"] = Vector3(-0.1, 0, 0)
+	tp["head"] = Vector3(0.15, 0, 0)
+	tp["hip_l"] = Vector3(-0.2, 0, 0.1)
+	tp["hip_r"] = Vector3(-0.2, 0, -0.1)
+	tp["knee_l"] = Vector3(0.3, 0, 0)
+	tp["knee_r"] = Vector3(0.3, 0, 0)
+	tp["shoulder_l"] = Vector3(-0.3, 0, -0.6)
+	tp["shoulder_r"] = Vector3(-0.3, 0, 0.6)
+	tp["elbow_l"] = Vector3(-0.3, 0, 0)
+	tp["elbow_r"] = Vector3(-0.3, 0, 0)
 
 
 func _pose_crouch(tp: Dictionary) -> void:

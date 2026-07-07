@@ -268,7 +268,7 @@ func _make_player_3d(pid: int, hunter: bool, pos: Vector3, col: Color) -> Charac
 	player.add_to_group("p%d_body_3d" % pid)
 
 	var cap_shape := CapsuleShape3D.new()
-	cap_shape.radius = 0.38
+	cap_shape.radius = 0.25
 	cap_shape.height = 1.8
 	var cs := CollisionShape3D.new()
 	cs.shape = cap_shape

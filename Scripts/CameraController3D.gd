@@ -5,6 +5,10 @@ extends Camera3D
 
 @export var target: Node3D
 
+# Camera target switching
+var _all_targets: Array[Node3D] = []
+var _target_index: int = 0
+
 @export_group("Orbit")
 @export var distance: float = 10.0
 @export var min_distance: float = 4.0
@@ -51,10 +55,11 @@ var _current_preset: int = Preset.THIRD_PERSON
 var _target_pitch: float = -25.0
 var _target_distance: float = 10.0
 
-# New variables for auto-orbit stability
+# New variables for auto-orbit stability & initial snap
 var _auto_orbit_angle: float = 0.0
 var _is_auto_orbiting: bool = false
 var _last_mouse_time: float = 0.0
+var _first_frame: bool = true
 
 
 func _ready() -> void:
@@ -64,6 +69,7 @@ func _ready() -> void:
 	_apply_preset(_current_preset)
 	if target:
 		_yaw = target.rotation.y  # Initialize to match player facing
+	_first_frame = true
 
 
 func _apply_preset(idx: int) -> void:
@@ -100,6 +106,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		else:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+	# V key switches camera between P1 (Red) and P2 (Blue)
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_V:
+			cycle_target()
 
 	# Mouse movement rotates the orbit (only if captured)
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -143,8 +154,14 @@ func _physics_process(delta: float) -> void:
 
 	var third_person := _current_preset != Preset.FIRST_PERSON
 
-	# Free Fire aim-down-sights: hold Right Mouse (via action map if available)
-	var ads_input = Input.is_action_pressed("p2_fire") or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	# Free Fire aim-down-sights: detect which player we're following and use their fire action
+	var ads_input := false
+	if target:
+		var player_id := 1
+		if target.has_method("get") and target.get("player_id") != null:
+			player_id = target.get("player_id")
+		var fire_action := "p%d_fire" % player_id
+		ads_input = Input.is_action_pressed(fire_action) or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	_ads = third_person and ads_input
 
 	# IMPROVED: Auto-orbit with mouse input detection
@@ -200,6 +217,13 @@ func _physics_process(delta: float) -> void:
 
 	var desired_pos := look_point + offset
 
+	# Raycast excludes for player colliders
+	var excludes: Array[RID] = []
+	var all_players = get_tree().get_nodes_in_group("p1_body_3d") + get_tree().get_nodes_in_group("p2_body_3d")
+	for p in all_players:
+		if p is CollisionObject3D:
+			excludes.append(p.get_rid())
+
 	if not third_person:
 		# First-person view
 		var forward := Vector3(
@@ -212,9 +236,16 @@ func _physics_process(delta: float) -> void:
 		var space := get_world_3d().direct_space_state
 		var query := PhysicsRayQueryParameters3D.create(look_point, desired_pos)
 		query.hit_from_inside = true
+		query.exclude = excludes
 		var hit := space.intersect_ray(query)
 		if not hit.is_empty():
-			desired_pos = hit.get("position")
+			var hit_pos: Vector3 = hit.get("position")
+			var ray_vec := (hit_pos - look_point)
+			var hit_dist := ray_vec.length()
+			if hit_dist > 0.001:
+				var ray_dir := ray_vec / hit_dist
+				var safe_dist := maxf(hit_dist - 0.05, 0.1)
+				desired_pos = look_point + ray_dir * safe_dist
 	else:
 		# IMPROVED: Raycast with better collision resolution
 		var space := get_world_3d().direct_space_state
@@ -224,60 +255,83 @@ func _physics_process(delta: float) -> void:
 		if _is_auto_orbiting:
 			# Temporarily reduce distance for auto-orbit to prevent jitter
 			var temp_distance = lerp(eff_distance, eff_distance * 0.7, 0.5)
-			ray_end = look_point + (desired_pos - look_point).normalized() * temp_distance
+			var raw_orbit := (desired_pos - look_point)
+			if raw_orbit.length_squared() > 0.0001:
+				ray_end = look_point + raw_orbit.normalized() * temp_distance
 		
 		var query := PhysicsRayQueryParameters3D.create(look_point, ray_end)
 		query.hit_from_inside = true
-		
-		var excludes = []
-		var all_players = get_tree().get_nodes_in_group("p1_body_3d") + get_tree().get_nodes_in_group("p2_body_3d")
-		for p in all_players:
-			if p is CollisionObject3D:
-				excludes.append(p.get_rid())
 		query.exclude = excludes
 		
 		var hit := space.intersect_ray(query)
 		if not hit.is_empty():
-			# Push camera away from wall with better offset
+			# Place camera safely in front of the wall inside the arena
 			var hit_pos: Vector3 = hit.get("position")
-			var dir_from_wall := (hit_pos - look_point).normalized()
-			
-			# Larger offset to prevent camera from pushing through walls
-			desired_pos = hit_pos + dir_from_wall * 0.5
-			
-			# Ensure we don't go below minimum distance
-			var actual_dist = (desired_pos - look_point).length()
-			if actual_dist < min_distance * 0.5:
-				desired_pos = look_point + dir_from_wall * min_distance * 0.5
+			var ray_vec := (hit_pos - look_point)
+			var hit_dist := ray_vec.length()
+			if hit_dist > 0.001:
+				var ray_dir := ray_vec / hit_dist
+				var safe_dist := maxf(hit_dist - 0.35, 1.2)
+				desired_pos = look_point + ray_dir * safe_dist
 		elif _is_auto_orbiting:
 			# If no wall hit during auto-orbit, ensure smooth transition
-			var center_dir = (desired_pos - look_point).normalized()
-			desired_pos = look_point + center_dir * min(eff_distance, distance * 0.9)
+			var center_vec := (desired_pos - look_point)
+			if center_vec.length_squared() > 0.0001:
+				desired_pos = look_point + center_vec.normalized() * min(eff_distance, distance * 0.9)
 
-	# IMPROVED: Smoother following with different speeds for different situations
+	# Ensure desired_pos is at least a minimum safe distance from look_point
+	if (desired_pos - look_point).length_squared() < 0.0001:
+		var safe_dir := offset.normalized() if offset.length_squared() > 0.0001 else Vector3.BACK
+		desired_pos = look_point + safe_dir * 0.2
+
+	# IMPROVED: Smoother following with fast snap on first frame / target change
 	var follow_speed_multiplier = 1.0
 	if _is_auto_orbiting:
-		# Faster follow during auto-orbit to keep up with player
 		follow_speed_multiplier = 1.5
 	
 	var current_speed = follow_speed * follow_speed_multiplier
 	
-	# Limit maximum movement per frame to prevent teleporting
-	var max_move = distance * 2.0 * delta
-	var movement = desired_pos - global_position
-	if movement.length() > max_move:
-		movement = movement.normalized() * max_move
+	if _first_frame or global_position.distance_squared_to(desired_pos) > 400.0:
+		_first_frame = false
+		global_position = desired_pos
+	else:
+		var lerp_weight := clampf(current_speed * delta, 0.0, 1.0)
+		global_position = global_position.lerp(desired_pos, lerp_weight)
 	
-	global_position += movement
-	
-	var look_dir = (look_point - global_position).normalized()
-	var up_vec = Vector3.UP
-	if abs(look_dir.y) > 0.99:
-		up_vec = Vector3(-sin(_yaw), 0, -cos(_yaw))
-		if up_vec.length_squared() < 0.01:
-			up_vec = Vector3.FORWARD
-		
-	look_at(look_point, up_vec)
+	# Safely update camera orientation facing look_point
+	var dist_sq := global_position.distance_squared_to(look_point)
+	if dist_sq > 0.0001:
+		var look_dir := (look_point - global_position).normalized()
+		var up_vec := Vector3.UP
+		if abs(look_dir.y) > 0.99:
+			up_vec = Vector3(-sin(_yaw), 0, -cos(_yaw))
+			if up_vec.length_squared() < 0.01:
+				up_vec = Vector3.FORWARD
+			
+		look_at(look_point, up_vec)
+
+
+func cycle_target() -> void:
+	if _all_targets.size() < 2:
+		print("[Camera] cycle_target: only %d targets registered, cannot switch." % _all_targets.size())
+		return
+	_target_index = (_target_index + 1) % _all_targets.size()
+	target = _all_targets[_target_index]
+	print("[Camera] Switched to target index %d: %s" % [_target_index, target.name])
+	_first_frame = true
+	# Snap yaw toward new target's facing so the camera doesn't whip around
+	if target:
+		_yaw = target.rotation.y
+
+
+func set_targets(targets: Array) -> void:
+	_all_targets.clear()
+	for t in targets:
+		if t is Node3D:
+			_all_targets.append(t)
+	_target_index = 0
+	if _all_targets.size() > 0:
+		target = _all_targets[0]
 
 
 # Helper function for angle difference

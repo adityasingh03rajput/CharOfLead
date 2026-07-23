@@ -24,6 +24,18 @@ extends CharacterBody3D
 
 # ── Runtime state ──
 var _cd: float = 0.0
+
+enum Weapon { PISTOL, RIFLE, SHOTGUN, BOMB }
+var _current_weapon: int = Weapon.PISTOL
+var _is_prone: bool = false
+var _is_melee: bool = false
+var _melee_t: float = 0.0
+var _grenade_cd: float = 0.0
+
+var _gun_pistol: Node3D
+var _gun_rifle: Node3D
+var _gun_shotgun: Node3D
+var _gun_bomb: Node3D
 var _is_dead := false
 var _has_won := false
 var _shoot_t: float = 0.0
@@ -55,7 +67,7 @@ var _rig: Node3D
 var _team_color: Color
 var _joints: Dictionary = {}   # name -> Node3D pivot
 var _hand_r: Node3D
-var _gun: MeshInstance3D
+var _gun: Node3D
 var _muzzle_light: OmniLight3D
 var _muzzle_flash: MeshInstance3D
 
@@ -81,6 +93,9 @@ func _ready() -> void:
 	if _rig:
 		_rig.rotation.y = _visual_yaw
 	rotation.y = 0
+
+	if is_hunter:
+		_set_weapon(Weapon.PISTOL)
 
 	if not is_idle_clone:
 		if GameManager:
@@ -201,51 +216,75 @@ func _build_leg(side: String, pelvis: Node3D, hip_pos: Vector3, skin: StandardMa
 
 
 func _build_gun(gear: StandardMaterial3D) -> void:
-	_gun = MeshInstance3D.new()
-	_gun.name = "Gun"
-	var gm := BoxMesh.new()
-	gm.size = Vector3(0.08, 0.45, 0.08)
+	# Pistol
+	_gun_pistol = Node3D.new()
+	var pm = MeshInstance3D.new()
+	var gm = BoxMesh.new()
+	gm.size = Vector3(0.08, 0.35, 0.08)
 	gm.material = gear
-	_gun.mesh = gm
-	_gun.position = GUN_REST
-	_hand_r.add_child(_gun)
+	pm.mesh = gm
+	_gun_pistol.add_child(pm)
+	_gun_pistol.position = GUN_REST
+	_hand_r.add_child(_gun_pistol)
+	_gun = _gun_pistol
+	
+	# Rifle
+	_gun_rifle = Node3D.new()
+	var rm = MeshInstance3D.new()
+	var rbox = BoxMesh.new()
+	rbox.size = Vector3(0.1, 0.8, 0.12)
+	rbox.material = gear
+	rm.mesh = rbox
+	_gun_rifle.add_child(rm)
+	_gun_rifle.position = GUN_REST + Vector3(0, 0, 0.2)
+	_gun_rifle.visible = false
+	_hand_r.add_child(_gun_rifle)
+	
+	# Shotgun
+	_gun_shotgun = Node3D.new()
+	var smm = MeshInstance3D.new()
+	var sbox = BoxMesh.new()
+	sbox.size = Vector3(0.12, 0.6, 0.1)
+	sbox.material = gear
+	smm.mesh = sbox
+	_gun_shotgun.add_child(smm)
+	_gun_shotgun.position = GUN_REST + Vector3(0, 0, 0.1)
+	_gun_shotgun.visible = false
+	_hand_r.add_child(_gun_shotgun)
 
-	# Magazine (protruding block beneath barrel)
-	var mag := MeshInstance3D.new()
-	var mag_mesh := BoxMesh.new()
-	mag_mesh.size = Vector3(0.06, 0.12, 0.06)
-	var mag_mat := StandardMaterial3D.new()
-	mag_mat.albedo_color = Color(0.06, 0.06, 0.08)
-	mag_mat.metallic = 0.7
-	mag_mat.roughness = 0.3
-	mag_mesh.material = mag_mat
-	mag.mesh = mag_mesh
-	mag.position = Vector3(0, -0.1, 0.06)
-	_gun.add_child(mag)
+	# Bomb (C4 Sticky Bomb)
+	_gun_bomb = Node3D.new()
+	var bm = MeshInstance3D.new()
+	var bbox = BoxMesh.new()
+	bbox.size = Vector3(0.16, 0.1, 0.24)
+	var bomb_mat = StandardMaterial3D.new()
+	bomb_mat.albedo_color = Color(0.18, 0.2, 0.22)
+	bbox.material = bomb_mat
+	bm.mesh = bbox
+	_gun_bomb.add_child(bm)
+	
+	var bstrip = MeshInstance3D.new()
+	var bstrip_mesh = BoxMesh.new()
+	bstrip_mesh.size = Vector3(0.17, 0.02, 0.08)
+	var bstrip_mat = StandardMaterial3D.new()
+	bstrip_mat.albedo_color = Color(1.0, 0.2, 0.1)
+	bstrip_mat.emission_enabled = true
+	bstrip_mat.emission = Color(1.0, 0.2, 0.1)
+	bstrip_mat.emission_energy_multiplier = 2.0
+	bstrip_mesh.material = bstrip_mat
+	bstrip.position = Vector3(0, 0.04, 0)
+	_gun_bomb.add_child(bstrip)
 
-	# Scope dot (small emissive red sphere on top of barrel)
-	var scope := MeshInstance3D.new()
-	var scope_mesh := SphereMesh.new()
-	scope_mesh.radius = 0.015
-	scope_mesh.height = 0.03
-	var scope_mat := StandardMaterial3D.new()
-	scope_mat.albedo_color = Color(1.0, 0.2, 0.1)
-	scope_mat.emission_enabled = true
-	scope_mat.emission = Color(1.0, 0.2, 0.1)
-	scope_mat.emission_energy_multiplier = 3.0
-	scope_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	scope_mesh.material = scope_mat
-	scope.mesh = scope_mesh
-	scope.position = Vector3(0, 0.05, -0.04)
-	_gun.add_child(scope)
+	_gun_bomb.position = GUN_REST + Vector3(0, 0, 0.05)
+	_gun_bomb.visible = false
+	_hand_r.add_child(_gun_bomb)
 
-	# Muzzle flash
 	_muzzle_light = OmniLight3D.new()
 	_muzzle_light.light_color = Color(1.0, 0.85, 0.45)
 	_muzzle_light.light_energy = 0.0
 	_muzzle_light.omni_range = 6.0
-	_muzzle_light.position = Vector3(0, -0.26, 0)
-	_gun.add_child(_muzzle_light)
+	_muzzle_light.position = Vector3(0, -0.3, 0)
+	_hand_r.add_child(_muzzle_light)
 
 	_muzzle_flash = MeshInstance3D.new()
 	var flash_quad := QuadMesh.new()
@@ -261,10 +300,9 @@ func _build_gun(gear: StandardMaterial3D) -> void:
 	flash_mat.emission_energy_multiplier = 5.0
 	flash_quad.material = flash_mat
 	_muzzle_flash.mesh = flash_quad
-	_muzzle_flash.position = Vector3(0, -0.28, 0)
+	_muzzle_flash.position = Vector3(0, -0.3, 0)
 	_muzzle_flash.visible = false
-	_gun.add_child(_muzzle_flash)
-
+	_hand_r.add_child(_muzzle_flash)
 
 # ── Rig material helpers ──
 static var _mat_cache: Dictionary = {}
@@ -375,6 +413,8 @@ func _physics_process(delta: float) -> void:
 	if _cd > 0.0:     _cd -= delta
 	if _shoot_t > 0.0: _shoot_t -= delta
 	if _hurt_t > 0.0:  _hurt_t -= delta
+	if _melee_t > 0.0: _melee_t -= delta
+	if _grenade_cd > 0.0: _grenade_cd -= delta
 
 	var on_floor := is_on_floor()
 	
@@ -445,9 +485,33 @@ func _physics_process(delta: float) -> void:
 	# Fallback to hardcoded keys if actions are not mapped in Project Settings
 	var is_running := Input.is_action_pressed("p%d_run" % player_id) if InputMap.has_action("p%d_run" % player_id) else (Input.is_key_pressed(KEY_SHIFT) if player_id == 1 else Input.is_key_pressed(KEY_CTRL))
 	var is_crouching := Input.is_action_pressed("p%d_crouch" % player_id) if InputMap.has_action("p%d_crouch" % player_id) else (Input.is_key_pressed(KEY_ALT) if player_id == 1 else Input.is_key_pressed(KEY_TAB))
+	
+	_is_prone = Input.is_key_pressed(KEY_Z)
+	
+	if is_hunter and GameManager and GameManager.is_armed(player_id) and not _has_won and not _is_dead:
+		var q_held = Input.is_physical_key_pressed(KEY_Q)
+		if Input.is_physical_key_pressed(KEY_1) and not q_held: _set_weapon(Weapon.PISTOL)
+		if Input.is_physical_key_pressed(KEY_2) and not q_held: _set_weapon(Weapon.RIFLE)
+		if Input.is_physical_key_pressed(KEY_3) and not q_held: _set_weapon(Weapon.SHOTGUN)
+		if Input.is_physical_key_pressed(KEY_4) and not q_held: _set_weapon(Weapon.BOMB)
+		if Input.is_physical_key_pressed(KEY_G) and _grenade_cd <= 0.0:
+			_set_weapon(Weapon.BOMB)
+			_throw_bomb()
+			
+	var is_melee_pressed = false
+	if player_id == 1:
+		is_melee_pressed = Input.is_physical_key_pressed(KEY_F)
+	else:
+		is_melee_pressed = Input.is_action_just_pressed(_act_fire) or Input.is_physical_key_pressed(KEY_ENTER) or Input.is_physical_key_pressed(KEY_M)
+
+	if is_melee_pressed and _melee_t <= 0.0 and on_floor and not _is_dead and not _has_won:
+		_do_melee()
+
 
 	var top_speed: float
-	if is_crouching:
+	if _is_prone:
+		top_speed = walk_speed * 0.2
+	elif is_crouching:
 		top_speed = walk_speed * 0.45
 	elif is_running:
 		top_speed = run_speed
@@ -512,12 +576,18 @@ func _physics_process(delta: float) -> void:
 		velocity.z = move_toward(velocity.z, 0.0, decel * delta * top_speed)
 
 	# --- Weapon ---
-	if is_hunter and GameManager and GameManager.is_armed(player_id) and not _has_won:
-		if _cd <= 0.0 and (Input.is_action_just_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)):
+	if is_hunter and GameManager and GameManager.is_armed(player_id) and not _has_won and _melee_t <= 0.0 and not _is_prone:
+		var firing = false
+		if _current_weapon == Weapon.RIFLE:
+			firing = Input.is_action_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		else:
+			firing = Input.is_action_just_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+			
+		if _cd <= 0.0 and firing:
 			_fire()
 
 	# --- Drive procedural skeleton ---
-	_animate(delta, input_dir != Vector2.ZERO, is_running, is_crouching)
+	_animate(delta, input_dir != Vector2.ZERO, is_running, is_crouching, _is_prone)
 
 	move_and_slide()
 
@@ -527,7 +597,7 @@ func _physics_process(delta: float) -> void:
 # PROCEDURAL ANIMATION — pick a state, build per-joint target rotations,
 # then critically-damp every joint toward them.
 # ====================================================================
-func _animate(delta: float, moving: bool, running: bool, crouching: bool) -> void:
+func _animate(delta: float, moving: bool, running: bool, crouching: bool, prone: bool) -> void:
 	var grounded := is_on_floor()
 
 	# Phase advances are now done inside _update_foot_plants
@@ -561,6 +631,10 @@ func _animate(delta: float, moving: bool, running: bool, crouching: bool) -> voi
 	if not _is_dead:
 		if _has_won:
 			_pose_victory(tp)
+		elif _melee_t > 0.0:
+			_pose_melee(tp)
+		elif prone:
+			_pose_prone(tp)
 		elif crouching:
 			_pose_crouch(tp)
 		elif not grounded:
@@ -625,7 +699,7 @@ func _animate(delta: float, moving: bool, running: bool, crouching: bool) -> voi
 		tp["hand_l"] = Vector3(0, 0.1, 0) # Supporting hand tilts
 		
 		# Braced stance only if standing still
-		if not moving and not crouching:
+		if not moving and not crouching and not prone and _melee_t <= 0.0:
 			tp["hip_l"] = Vector3(0, 0.2, 0.1)
 			tp["hip_r"] = Vector3(0, -0.2, -0.1)
 			tp["knee_l"] = Vector3(0.15, 0, 0)
@@ -793,6 +867,275 @@ func _pose_walk(tp: Dictionary, running: bool) -> void:
 
 
 
+
+func get_weapon_name(w: int) -> String:
+	match w:
+		Weapon.PISTOL: return "PISTOL"
+		Weapon.RIFLE: return "ASSAULT RIFLE"
+		Weapon.SHOTGUN: return "TACTICAL SHOTGUN"
+		Weapon.BOMB: return "C4 STICKY BOMB"
+	return "UNKNOWN"
+
+
+func _set_weapon(w: int) -> void:
+	if _current_weapon == w: return
+	_current_weapon = w
+	if _gun_pistol: _gun_pistol.visible = (w == Weapon.PISTOL)
+	if _gun_rifle: _gun_rifle.visible = (w == Weapon.RIFLE)
+	if _gun_shotgun: _gun_shotgun.visible = (w == Weapon.SHOTGUN)
+	if _gun_bomb: _gun_bomb.visible = (w == Weapon.BOMB)
+	_cd = 0.3 # swap delay
+	
+	if GameManager:
+		GameManager.pop_weapon_name(player_id, get_weapon_name(w))
+
+func _do_melee() -> void:
+	_melee_t = 0.4
+	
+	# Shape cast forward for forgiving melee hit
+	var space := get_world_3d().direct_space_state
+	var mpos := global_position + Vector3(0, 1.0, 0)
+	var dir := -_rig.global_transform.basis.z
+	
+	var q := PhysicsShapeQueryParameters3D.new()
+	var ss := SphereShape3D.new()
+	ss.radius = 0.8
+	q.shape = ss
+	q.transform = Transform3D(Basis(), mpos + dir * 0.8)
+	q.exclude = [get_rid()]
+	
+	var hits := space.intersect_shape(q)
+	for hit in hits:
+		if hit.get("collider"):
+			var col = hit.collider
+			var target_id = 2 if player_id == 1 else 1
+			if col.is_in_group("p%d_body_3d" % target_id) and GameManager:
+				GameManager.apply_damage(target_id, 25.0)
+				var hit_pos = col.global_position + Vector3(0, 1.0, 0)
+				var hit_norm = (global_position - col.global_position).normalized()
+				_spawn_blood_3d(hit_pos, hit_norm)
+				break # Only hit one player per punch
+
+
+func _pose_melee(tp: Dictionary) -> void:
+	# Punch/Kick combo depending on phase of melee_t
+	var t = 1.0 - (_melee_t / 0.4)
+	if t < 0.5:
+		# Wind up
+		tp["spine"] = Vector3(0, -0.4, 0)
+		tp["shoulder_r"] = Vector3(0.5, 0, 0.4)
+		tp["elbow_r"] = Vector3(-1.0, 0, 0)
+	else:
+		# Strike
+		tp["spine"] = Vector3(0, 0.5, 0)
+		tp["shoulder_r"] = Vector3(1.4, 0, -0.2)
+		tp["elbow_r"] = Vector3(-0.1, 0, 0)
+		tp["hand_r"] = Vector3(-0.2, 0, 0)
+	tp["hip_l"] = Vector3(0.2, 0, 0.1)
+	tp["knee_l"] = Vector3(-0.3, 0, 0)
+
+func _pose_prone(tp: Dictionary) -> void:
+	tp["pelvis"] = Vector3(0, 0, 0)
+	if _joints.has("pelvis"):
+		_joints["pelvis"].position.y = lerpf(_joints["pelvis"].position.y, 0.2, 0.2)
+	tp["spine"] = Vector3(1.3, 0, 0)
+	tp["torso"] = Vector3(0.2, 0, 0)
+	tp["neck"] = Vector3(-1.0, 0, 0)
+	tp["head"] = Vector3(-0.5, 0, 0)
+	tp["hip_l"] = Vector3(-1.4, 0, -0.2)
+	tp["hip_r"] = Vector3(-1.4, 0, 0.2)
+	tp["knee_l"] = Vector3(0.1, 0, 0)
+	tp["knee_r"] = Vector3(0.1, 0, 0)
+	tp["foot_l"] = Vector3(0.3, 0, 0)
+	tp["foot_r"] = Vector3(0.3, 0, 0)
+	tp["shoulder_l"] = Vector3(1.2, 0, -0.4)
+	tp["shoulder_r"] = Vector3(1.2, 0, 0.4)
+	tp["elbow_l"] = Vector3(-0.8, 0, 0)
+	tp["elbow_r"] = Vector3(-0.8, 0, 0)
+
+func _throw_bomb() -> void:
+	_cd = 0.8
+	_shoot_t = 0.3
+	_grenade_cd = 1.0
+
+	var cam = get_viewport().get_camera_3d()
+	var cam_forward: Vector3 = -cam.global_transform.basis.z if cam else -_rig.global_transform.basis.z
+	cam_forward = cam_forward.normalized()
+	var spawn_pos: Vector3 = global_position + Vector3.UP * 1.4 + cam_forward * 0.6
+
+	# Create GTA 5 style Sticky Bomb object
+	var bomb := RigidBody3D.new()
+	bomb.contact_monitor = true
+	bomb.max_contacts_reported = 4
+	
+	# Compact C4 brick shape
+	var cs := CollisionShape3D.new()
+	var box_shape := BoxShape3D.new()
+	box_shape.size = Vector3(0.2, 0.12, 0.3)
+	cs.shape = box_shape
+	bomb.add_child(cs)
+
+	# C4 Block Mesh
+	var mi := MeshInstance3D.new()
+	var box_mesh := BoxMesh.new()
+	box_mesh.size = Vector3(0.2, 0.12, 0.3)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.2, 0.22, 0.25)
+	mat.roughness = 0.7
+	box_mesh.material = mat
+	mi.mesh = box_mesh
+	bomb.add_child(mi)
+
+	# Hazard Label Strip
+	var strip := MeshInstance3D.new()
+	var strip_mesh := BoxMesh.new()
+	strip_mesh.size = Vector3(0.21, 0.03, 0.1)
+	var strip_mat := StandardMaterial3D.new()
+	strip_mat.albedo_color = Color(0.95, 0.15, 0.1)
+	strip_mat.emission_enabled = true
+	strip_mat.emission = Color(0.95, 0.15, 0.1)
+	strip_mat.emission_energy_multiplier = 1.5
+	strip_mesh.material = strip_mat
+	strip.position = Vector3(0, 0.05, 0)
+	bomb.add_child(strip)
+
+	# LED Blinking Light
+	var led_light := OmniLight3D.new()
+	led_light.name = "LEDLight"
+	led_light.light_color = Color(1.0, 0.1, 0.1)
+	led_light.light_energy = 3.0
+	led_light.omni_range = 2.5
+	bomb.add_child(led_light)
+
+	get_tree().root.add_child(bomb)
+	bomb.global_position = spawn_pos
+
+	# GTA 5 Overhead Throw Arc: Strong forward push + high upward throw launch!
+	var throw_speed := 18.0
+	var arc_up := Vector3(0.0, 7.5, 0.0)
+	bomb.linear_velocity = cam_forward * throw_speed + arc_up
+	bomb.angular_velocity = Vector3(
+		randf_range(-14.0, 14.0),
+		randf_range(-8.0, 8.0),
+		randf_range(-14.0, 14.0)
+	)
+
+	# Overhead arm throw animation
+	if _gun_bomb:
+		_gun_bomb.position = GUN_REST + Vector3(0, 0.25, -0.35)
+		_gun_bomb.rotation.x = -0.7
+		var gtween := create_tween().set_parallel(true)
+		gtween.tween_property(_gun_bomb, "position", GUN_REST, 0.35).set_ease(Tween.EASE_OUT)
+		gtween.tween_property(_gun_bomb, "rotation:x", 0.0, 0.35).set_ease(Tween.EASE_OUT)
+
+	# Dynamic Sticky Bomb Fuse & Remote Detonator Script
+	var script := GDScript.new()
+	script.source_code = """
+extends RigidBody3D
+
+var fuse: float = 3.5
+var owner_id: int = 1
+var is_stuck: bool = false
+var _blink_timer: float = 0.0
+var _led: OmniLight3D
+var _exploded: bool = false
+
+func _ready() -> void:
+	_led = get_node_or_null("LEDLight")
+	body_entered.connect(_on_body_entered)
+
+func _on_body_entered(_body: Node) -> void:
+	if is_stuck or _exploded: return
+	is_stuck = true
+	freeze = true
+
+func _process(delta: float) -> void:
+	if _exploded: return
+	fuse -= delta
+	_blink_timer += delta * (14.0 if is_stuck else 7.0)
+	if _led:
+		_led.light_energy = 6.0 if sin(_blink_timer) > 0.0 else 0.2
+
+	var remote_det = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or Input.is_physical_key_pressed(KEY_G)
+	if fuse <= 0.0 or (is_stuck and remote_det):
+		explode()
+
+func explode() -> void:
+	if _exploded: return
+	_exploded = true
+
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsShapeQueryParameters3D.new()
+	var ss := SphereShape3D.new()
+	ss.radius = 6.0
+	q.shape = ss
+	q.transform = global_transform
+	var hits := space.intersect_shape(q)
+
+	for h in hits:
+		var col = h.get("collider")
+		if col:
+			var target_id = 0
+			if col.is_in_group("p1_body_3d"): target_id = 1
+			elif col.is_in_group("p2_body_3d"): target_id = 2
+
+			if target_id > 0:
+				var dist = global_position.distance_to(col.global_position)
+				var dmg = lerpf(75.0, 25.0, clampf(dist / 6.0, 0.0, 1.0))
+				if GameManager:
+					GameManager.apply_damage(target_id, dmg)
+
+	var cam = get_viewport().get_camera_3d()
+	if cam and cam.has_method("shake_hit"):
+		cam.shake_hit()
+
+	var expl := CPUParticles3D.new()
+	expl.emitting = false
+	expl.one_shot = true
+	expl.amount = 120
+	expl.lifetime = 0.7
+	expl.explosiveness = 0.95
+	var em := SphereMesh.new()
+	em.radius = 0.25
+	em.height = 0.5
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.45, 0.05)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.6, 0.1)
+	mat.emission_energy_multiplier = 6.0
+	em.material = mat
+	expl.mesh = em
+	expl.direction = Vector3.UP
+	expl.spread = 180.0
+	expl.initial_velocity_min = 8.0
+	expl.initial_velocity_max = 20.0
+	expl.gravity = Vector3(0, -6, 0)
+	get_tree().root.add_child(expl)
+	expl.global_position = global_position
+	expl.emitting = true
+	get_tree().create_timer(1.2).timeout.connect(expl.queue_free)
+
+	var flash_light := OmniLight3D.new()
+	flash_light.light_color = Color(1.0, 0.7, 0.2)
+	flash_light.light_energy = 25.0
+	flash_light.omni_range = 15.0
+	get_tree().root.add_child(flash_light)
+	flash_light.global_position = global_position
+	var ltween = create_tween()
+	ltween.tween_property(flash_light, "light_energy", 0.0, 0.45)
+	ltween.tween_callback(flash_light.queue_free)
+
+	queue_free()
+"""
+	script.reload()
+	bomb.set_script(script)
+	bomb.set_process(true)
+	bomb.set("owner_id", player_id)
+
+func _throw_grenade() -> void:
+	_throw_bomb()
+
+
 func _pose_jump(tp: Dictionary) -> void:
 	tp["spine"] = Vector3(0.1, 0, 0)
 	tp["torso"] = Vector3(0.05, 0, 0)
@@ -906,15 +1249,36 @@ func _on_game_over(winner_id: int) -> void:
 
 
 func _fire() -> void:
-	_cd = fire_cooldown
-	_shoot_t = 0.3   # hold the shoot pose briefly
+	if _current_weapon == Weapon.BOMB:
+		_throw_bomb()
+		return
 
-	# Camera shake on fire
+	var w_dmg = damage
+	var w_cd = fire_cooldown
+	var is_shotgun = false
+	
+	if _current_weapon == Weapon.PISTOL:
+		w_dmg = 28.0
+		w_cd = 0.35
+	elif _current_weapon == Weapon.RIFLE:
+		w_dmg = 14.0
+		w_cd = 0.1
+	elif _current_weapon == Weapon.SHOTGUN:
+		w_dmg = 12.0
+		w_cd = 0.8
+		is_shotgun = true
+		
+	_cd = w_cd
+	_shoot_t = 0.2
+	
+	var active_gun = _gun_pistol
+	if _current_weapon == Weapon.RIFLE: active_gun = _gun_rifle
+	if _current_weapon == Weapon.SHOTGUN: active_gun = _gun_shotgun
+
 	var cam = get_viewport().get_camera_3d()
 	if cam and cam.has_method("shake_fire"):
 		cam.shake_fire()
 
-	# Muzzle flash burst — light pop + emissive quad for one beat.
 	if _muzzle_flash:
 		_muzzle_flash.visible = true
 		_muzzle_flash.scale = Vector3.ONE * randf_range(0.8, 1.4)
@@ -925,77 +1289,69 @@ func _fire() -> void:
 		if _muzzle_light: _muzzle_light.light_energy = 0.0
 	)
 
-	# Gun recoil kick (local to the hand).
-	if _gun:
-		_gun.position = GUN_REST + Vector3(0, 0.05, 0)
-		_gun.rotation.x = -0.2
+	if active_gun:
+		active_gun.position = GUN_REST + Vector3(0, 0.05, 0)
+		active_gun.rotation.x = -0.2
 		var gtween := create_tween().set_parallel(true)
-		gtween.tween_property(_gun, "position", GUN_REST, 0.15).set_ease(Tween.EASE_OUT)
-		gtween.tween_property(_gun, "rotation:x", 0.0, 0.15).set_ease(Tween.EASE_OUT)
+		gtween.tween_property(active_gun, "position", GUN_REST, 0.15).set_ease(Tween.EASE_OUT)
+		gtween.tween_property(active_gun, "rotation:x", 0.0, 0.15).set_ease(Tween.EASE_OUT)
 
-	# Aim: cast from the camera centre (crosshair) to find the exact target point.
 	var space := get_world_3d().direct_space_state
-
 	var muzzle_pos := global_position + Vector3.UP * muzzle_height + global_transform.basis.x * 0.4 - global_transform.basis.z * 0.4
-	var target_pos := muzzle_pos - global_transform.basis.z * weapon_range
 
+	var screen_center = get_viewport().get_visible_rect().size / 2.0
+	var cam_from = cam.project_ray_origin(screen_center) if cam else global_position
+	var cam_forward = cam.project_ray_normal(screen_center) if cam else -global_transform.basis.z
+	var target_pos = cam_from + cam_forward * weapon_range
+	
 	if cam:
-		var screen_center = get_viewport().get_visible_rect().size / 2.0
-		var cam_from = cam.project_ray_origin(screen_center)
-		var cam_forward = cam.project_ray_normal(screen_center)
-		var cam_to = cam_from + cam_forward * weapon_range
-
-		var cam_query = PhysicsRayQueryParameters3D.create(cam_from, cam_to)
-		
+		var cam_query = PhysicsRayQueryParameters3D.create(cam_from, target_pos)
 		var excludes = [get_rid()]
 		var all_players = get_tree().get_nodes_in_group("p1_body_3d") + get_tree().get_nodes_in_group("p2_body_3d")
 		for p in all_players:
 			if p is CollisionObject3D and p != self:
 				excludes.append(p.get_rid())
 		cam_query.exclude = excludes
-		
 		var cam_hit = space.intersect_ray(cam_query)
-
 		if cam_hit:
 			target_pos = cam_hit.get("position")
-		else:
-			target_pos = cam_to
 
-		# Camera recoil (kick the view up a touch).
 		var current_pitch = cam.get("_pitch")
 		if current_pitch != null:
-			cam.set("_pitch", current_pitch + 1.5)
+			cam.set("_pitch", current_pitch + (2.5 if is_shotgun else 1.5))
 
-		# Turn the character to face the shot horizontally.
 		var flat_dir = (target_pos - global_position)
 		flat_dir.y = 0
 		if flat_dir.length_squared() > 0.01:
 			_visual_yaw = atan2(-flat_dir.x, -flat_dir.z)
 			_rig.rotation.y = _visual_yaw
 
-	# Trace from the muzzle to (slightly past) the crosshair target.
-	var aim_dir = (target_pos - muzzle_pos).normalized()
-	var query := PhysicsRayQueryParameters3D.create(muzzle_pos, target_pos + aim_dir * 1.0)
-	query.exclude = [get_rid()]
-
-	var hit := space.intersect_ray(query)
-	var final_hit_pos := target_pos
-
-	if not hit.is_empty():
-		final_hit_pos = hit.get("position")
-		var hit_normal = hit.get("normal", Vector3.UP)
-		var collider = hit.get("collider")
-		var target_id: int = 2 if player_id == 1 else 1
-		if collider != null and collider.is_in_group("p%d_body_3d" % target_id):
-			if GameManager:
-				GameManager.apply_damage(target_id, damage)
-			_spawn_blood_3d(final_hit_pos, hit_normal)
-		else:
-			# Wall/environment hit — spawn sparks
-			_spawn_spark_3d(final_hit_pos, hit_normal)
-
-	_draw_tracer_3d(muzzle_pos, final_hit_pos)
-
+	var rays = 5 if is_shotgun else 1
+	for i in range(rays):
+		var aim_dir = (target_pos - muzzle_pos).normalized()
+		if is_shotgun:
+			aim_dir.x += randf_range(-0.1, 0.1)
+			aim_dir.y += randf_range(-0.1, 0.1)
+			aim_dir.z += randf_range(-0.1, 0.1)
+			aim_dir = aim_dir.normalized()
+			
+		var query := PhysicsRayQueryParameters3D.create(muzzle_pos, muzzle_pos + aim_dir * weapon_range)
+		query.exclude = [get_rid()]
+		var hit := space.intersect_ray(query)
+		var final_hit_pos = muzzle_pos + aim_dir * weapon_range
+		
+		if not hit.is_empty():
+			final_hit_pos = hit.get("position")
+			var hit_normal = hit.get("normal", Vector3.UP)
+			var collider = hit.get("collider")
+			var target_id: int = 2 if player_id == 1 else 1
+			if collider != null and collider.is_in_group("p%d_body_3d" % target_id):
+				if GameManager:
+					GameManager.apply_damage(target_id, w_dmg)
+				_spawn_blood_3d(final_hit_pos, hit_normal)
+			else:
+				_spawn_spark_3d(final_hit_pos, hit_normal)
+		_draw_tracer_3d(muzzle_pos, final_hit_pos)
 
 func _spawn_blood_3d(pos: Vector3, normal: Vector3) -> void:
 	var particles := CPUParticles3D.new()
@@ -1029,7 +1385,7 @@ func _spawn_blood_3d(pos: Vector3, normal: Vector3) -> void:
 	get_tree().root.add_child(particles)
 	particles.global_position = pos
 
-	if normal.distance_squared_to(Vector3.UP) > 0.01 and normal.distance_squared_to(Vector3.DOWN) > 0.01:
+	if normal.length_squared() > 0.001 and normal.distance_squared_to(Vector3.UP) > 0.01 and normal.distance_squared_to(Vector3.DOWN) > 0.01:
 		particles.look_at(pos + normal, Vector3.UP)
 
 	particles.emitting = true
@@ -1091,7 +1447,11 @@ func _draw_tracer_3d(start: Vector3, end: Vector3) -> void:
 	mesh_inst.global_position = start
 
 	if start.distance_squared_to(end) > 0.01:
-		mesh_inst.look_at(end, Vector3.UP)
+		var dir := (end - start).normalized()
+		var up_vec := Vector3.UP
+		if abs(dir.dot(Vector3.UP)) > 0.99:
+			up_vec = Vector3.RIGHT
+		mesh_inst.look_at(end, up_vec)
 		mesh_inst.rotate_object_local(Vector3.RIGHT, PI / 2.0)
 
 	var dist = start.distance_to(end)
@@ -1103,7 +1463,16 @@ func _draw_tracer_3d(start: Vector3, end: Vector3) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _is_dead or is_idle_clone or player_id != 2 or not GameManager or GameManager.is_armed(2):
+	if _is_dead or is_idle_clone:
+		return
+
+	if is_hunter and GameManager and GameManager.is_armed(player_id) and event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_set_weapon((_current_weapon + 3) % 4)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_set_weapon((_current_weapon + 1) % 4)
+
+	if player_id != 2 or not GameManager or GameManager.is_armed(2):
 		return
 		
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:

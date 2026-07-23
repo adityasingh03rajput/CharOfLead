@@ -15,6 +15,7 @@ signal health_changed(player_id, current, maximum)
 signal player_died(player_id)
 signal game_over(winner_id)
 signal damage_dealt(target_id, amount)   # a shot actually connected (for hit markers)
+signal weapon_changed(player_id, weapon_name)
 
 @export var min_swap_time: float = 15.0
 @export var max_swap_time: float = 45.0
@@ -127,6 +128,10 @@ func _end_game(dead_id: int) -> void:
 	var winner_id: int = 2 if dead_id == 1 else 1
 	player_died.emit(dead_id)
 	game_over.emit(winner_id)
+
+
+func pop_weapon_name(player_id: int, weapon_name: String) -> void:
+	weapon_changed.emit(player_id, weapon_name)
 
 
 # Debug: force an immediate swap. Bind the "force_swap" action in the Input Map.

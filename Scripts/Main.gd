@@ -194,14 +194,17 @@ func _build_3d_environment() -> void:
 	env_3d.add_child(p2_3d)
 
 	# === CAMERA ===
+	# Follows P1 (Red Soldier) by default — V key switches between P1/P2.
 	var cam_script := load("res://Scripts/CameraController3D.gd") as GDScript
 	var cam := Camera3D.new()
 	cam.name = "Camera3D"
 	cam.position = Vector3(0, 18, 12)
 	cam.rotation_degrees = Vector3(-58, 0, 0)
 	cam.set_script(cam_script)
-	cam.set("target", p2_3d)
+	cam.set("target", p1_3d)
 	env_3d.add_child(cam)
+	# Wire both players AFTER add_child so _ready has run and the node is live
+	cam.call("set_targets", [p1_3d, p2_3d])
 
 
 
@@ -487,6 +490,57 @@ func _build_hud() -> void:
 	winner_label.text = "PLAYER X WINS!"
 	hud.add_child(winner_label)
 
+	# Weapon Pop-up (GTA 5 / Free Fire style gun name banner)
+	var pop_panel := PanelContainer.new()
+	pop_panel.name = "WeaponPopup"
+	pop_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	pop_panel.position = Vector2(-320, -110)
+	pop_panel.size = Vector2(280, 65)
+	pop_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pop_panel.visible = false
+
+	var pop_style := StyleBoxFlat.new()
+	pop_style.bg_color = Color(0.06, 0.07, 0.1, 0.88)
+	pop_style.border_width_left = 4
+	pop_style.border_width_top = 1
+	pop_style.border_width_right = 1
+	pop_style.border_width_bottom = 1
+	pop_style.border_color = Color(1.0, 0.7, 0.15, 0.9)
+	pop_style.corner_radius_top_left = 6
+	pop_style.corner_radius_bottom_left = 6
+	pop_style.corner_radius_top_right = 6
+	pop_style.corner_radius_bottom_right = 6
+	pop_panel.add_theme_stylebox_override("panel", pop_style)
+
+	var pop_margin := MarginContainer.new()
+	pop_margin.add_theme_constant_override("margin_left", 12)
+	pop_margin.add_theme_constant_override("margin_top", 6)
+	pop_margin.add_theme_constant_override("margin_right", 12)
+	pop_margin.add_theme_constant_override("margin_bottom", 6)
+	pop_panel.add_child(pop_margin)
+
+	var pop_vbox := VBoxContainer.new()
+	pop_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	pop_vbox.add_theme_constant_override("separation", 1)
+	pop_margin.add_child(pop_vbox)
+
+	var pop_subtitle := Label.new()
+	pop_subtitle.text = "EQUIPPED WEAPON"
+	pop_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pop_subtitle.add_theme_font_size_override("font_size", 11)
+	pop_subtitle.add_theme_color_override("font_color", Color(1.0, 0.7, 0.2, 0.85))
+	pop_vbox.add_child(pop_subtitle)
+
+	var pop_title := Label.new()
+	pop_title.name = "Title"
+	pop_title.text = "PISTOL"
+	pop_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pop_title.add_theme_font_size_override("font_size", 22)
+	pop_title.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+	pop_vbox.add_child(pop_title)
+
+	hud.add_child(pop_panel)
+
 	# Wire the HUD exports
 	hud.set("p1_bar", p1_bar)
 	hud.set("p2_bar", p2_bar)
@@ -494,6 +548,12 @@ func _build_hud() -> void:
 	hud.set("winner_label", winner_label)
 	hud.set("flash", flash)
 	hud.set("hitmarker", hitmarker)
+	hud.set("weapon_popup", pop_panel)
+	
+	# Build the key-help overlay (Shift + ?)
+	var help_panel := _build_help_overlay()
+	hud.add_child(help_panel)
+	hud.call("set_help_panel", help_panel)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -503,3 +563,136 @@ func _unhandled_input(event: InputEvent) -> void:
 				GameManager.restart()
 			else:
 				get_tree().reload_current_scene()
+
+
+func _build_help_overlay() -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.name = "HelpPanel"
+	panel.visible = false
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.position = Vector2(-400, -300)
+	panel.size = Vector2(800, 600)
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color(0.05, 0.05, 0.08, 0.95)
+	bg_style.border_width_left = 2
+	bg_style.border_width_top = 2
+	bg_style.border_width_right = 2
+	bg_style.border_width_bottom = 2
+	bg_style.border_color = Color(0.3, 0.5, 0.8, 0.8)
+	bg_style.corner_radius_top_left = 8
+	bg_style.corner_radius_top_right = 8
+	bg_style.corner_radius_bottom_left = 8
+	bg_style.corner_radius_bottom_right = 8
+	panel.add_theme_stylebox_override("panel", bg_style)
+	
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	panel.add_child(vbox)
+	
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	vbox.add_child(margin)
+	
+	var content := VBoxContainer.new()
+	content.add_theme_constant_override("separation", 12)
+	margin.add_child(content)
+	
+	# Title
+	var title := Label.new()
+	title.text = "CONTROLS"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 36)
+	title.add_theme_color_override("font_color", Color(0.3, 0.6, 1.0))
+	content.add_child(title)
+	
+	var spacer1 := Control.new()
+	spacer1.custom_minimum_size = Vector2(0, 10)
+	content.add_child(spacer1)
+	
+	# P1 Section
+	var p1_title := Label.new()
+	p1_title.text = "PLAYER 1 — RED SOLDIER"
+	p1_title.add_theme_font_size_override("font_size", 22)
+	p1_title.add_theme_color_override("font_color", Color(0.85, 0.15, 0.15))
+	content.add_child(p1_title)
+	
+	_add_help_line(content, "WASD", "Move")
+	_add_help_line(content, "Space", "Jump")
+	_add_help_line(content, "Shift", "Run")
+	_add_help_line(content, "Alt", "Crouch")
+	_add_help_line(content, "Mouse / Left Click", "Aim & Shoot (3D Mode)")
+	_add_help_line(content, "1, 2, 3, 4 / Scroll", "Switch Weapon (Pistol/Rifle/Shotgun/C4)")
+	_add_help_line(content, "G / Right Click", "Throw / Detonate GTA 5 Sticky Bomb")
+	_add_help_line(content, "F", "Grapple Hook (2D Mode)")
+	_add_help_line(content, "Ctrl+WASD", "Steer Grapple Reticle")
+	_add_help_line(content, "E", "Release Grapple")
+	
+	var spacer2 := Control.new()
+	spacer2.custom_minimum_size = Vector2(0, 15)
+	content.add_child(spacer2)
+	
+	# P2 Section
+	var p2_title := Label.new()
+	p2_title.text = "PLAYER 2 — BLUE ASSASSIN"
+	p2_title.add_theme_font_size_override("font_size", 22)
+	p2_title.add_theme_color_override("font_color", Color(0.2, 0.4, 0.95))
+	content.add_child(p2_title)
+	
+	_add_help_line(content, "Arrow Keys", "Move")
+	_add_help_line(content, "RCtrl", "Jump / Drop from Ceiling")
+	_add_help_line(content, "RShift", "Run")
+	_add_help_line(content, "Tab", "Crouch")
+	_add_help_line(content, "Mouse / Left Click", "Aim & Shoot (2D Mode)")
+	
+	var spacer3 := Control.new()
+	spacer3.custom_minimum_size = Vector2(0, 15)
+	content.add_child(spacer3)
+	
+	# General Controls
+	var gen_title := Label.new()
+	gen_title.text = "GENERAL"
+	gen_title.add_theme_font_size_override("font_size", 22)
+	gen_title.add_theme_color_override("font_color", Color(0.7, 0.7, 0.8))
+	content.add_child(gen_title)
+	
+	_add_help_line(content, "Shift + ?", "Toggle This Help")
+	_add_help_line(content, "Ctrl + R", "Restart Game")
+	_add_help_line(content, "V", "Switch Camera (Red ↔ Blue)")
+	
+	var spacer4 := Control.new()
+	spacer4.custom_minimum_size = Vector2(0, 10)
+	content.add_child(spacer4)
+	
+	# Close hint
+	var close_hint := Label.new()
+	close_hint.text = "Press Shift + ? again to close"
+	close_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	close_hint.add_theme_font_size_override("font_size", 16)
+	close_hint.add_theme_color_override("font_color", Color(0.5, 0.5, 0.6))
+	content.add_child(close_hint)
+	
+	return panel
+
+
+func _add_help_line(parent: VBoxContainer, key: String, action: String) -> void:
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 20)
+	parent.add_child(hbox)
+	
+	var key_label := Label.new()
+	key_label.text = key
+	key_label.custom_minimum_size = Vector2(220, 0)
+	key_label.add_theme_font_size_override("font_size", 18)
+	key_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7))
+	hbox.add_child(key_label)
+	
+	var action_label := Label.new()
+	action_label.text = action
+	action_label.add_theme_font_size_override("font_size", 18)
+	action_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9))
+	hbox.add_child(action_label)

@@ -55,6 +55,19 @@ func reset_state(spawn_pos: Vector3) -> void:
 	_has_won = false
 	_is_prone = false
 	_melee_t = 0.0
+	_last_health = 100.0
+	set_physics_process(true)
+
+	if _rig():
+		_rig().rotation = Vector3.ZERO
+		_rig().position = Vector3.ZERO
+
+	if _skeleton:
+		var j: Dictionary = _skeleton.get("joints")
+		for key in j:
+			if j[key] is Node3D:
+				(j[key] as Node3D).rotation = Vector3.ZERO
+
 	global_position = spawn_pos
 	velocity = Vector3.ZERO
 	if _weapon and _weapon.has_method("set_weapon"):

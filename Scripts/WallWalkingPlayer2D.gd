@@ -68,6 +68,7 @@ func reset_state(spawn_pos: Vector2) -> void:
 	if _reticle: _reticle.visible = false
 	if _cable:   _cable.visible   = false
 	if _spike:   _spike.visible   = false
+	set_physics_process(true)
 	global_position = spawn_pos
 	velocity = Vector2.ZERO
 	rotation = 0.0

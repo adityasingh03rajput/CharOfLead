@@ -312,7 +312,7 @@ func _setup_grapple_visuals() -> void:
 # ====================================================================
 func _handle_grapple(delta: float, input_x: float, input_y: float) -> bool:
 	# Cable is null for P2. Dimension guard stops P1 from grappling in 3D.
-	if _cable == null or _is_dead or _has_won:
+	if _cable == null or _is_dead or _has_won or not is_multiplayer_authority():
 		return false
 	if GameManager and GameManager.is_armed(player_id):
 		# Armed right now (3D mode) — hide visuals, reset state, do nothing.
@@ -605,10 +605,11 @@ func _physics_process(delta: float) -> void:
 		_animate_stickman(delta, 0.0, false, false)
 		return
 
-	var input_x = Input.get_axis(_act_left, _act_right)
-	var input_y = Input.get_axis(_act_up, _act_down)
-	var is_running := Input.is_key_pressed(KEY_SHIFT) if player_id == 1 else Input.is_key_pressed(KEY_CTRL)
-	var is_crouching := Input.is_action_pressed(_act_down)
+	var is_auth := is_multiplayer_authority()
+	var input_x = Input.get_axis(_act_left, _act_right) if is_auth else 0.0
+	var input_y = Input.get_axis(_act_up, _act_down) if is_auth else 0.0
+	var is_running := (Input.is_key_pressed(KEY_SHIFT) if player_id == 1 else Input.is_key_pressed(KEY_CTRL)) if is_auth else false
+	var is_crouching := Input.is_action_pressed(_act_down) if is_auth else false
 
 	# --- Grapple (victim only): F toggles aim, Ctrl+WASD steers reticle, F fires,
 	# E bails. While steering the reticle, WASD drives it instead of the body. ---
@@ -643,7 +644,7 @@ func _physics_process(delta: float) -> void:
 		target_rotation = 0.0
 		move_intensity = input_x
 		
-		if Input.is_action_just_pressed(_act_jump) and not _is_dead:
+		if is_auth and Input.is_action_just_pressed(_act_jump) and not _is_dead:
 			velocity.y = -jump_force
 			if _skeleton: _skeleton.scale = Vector2(0.6, 1.4)
 
@@ -659,7 +660,7 @@ func _physics_process(delta: float) -> void:
 		move_intensity = input_y
 		
 		# Jump off the wall
-		if Input.is_action_just_pressed(_act_jump) and not _is_dead:
+		if is_auth and Input.is_action_just_pressed(_act_jump) and not _is_dead:
 			velocity.y = -jump_force * 0.8
 			velocity.x = -wall_dir * jump_force * 0.6
 			_current_state = MoveState.AIR
@@ -673,7 +674,7 @@ func _physics_process(delta: float) -> void:
 		move_intensity = input_x
 		
 		# Drop down
-		if input_y > 0.5 or Input.is_action_just_pressed(_act_jump):
+		if input_y > 0.5 or (is_auth and Input.is_action_just_pressed(_act_jump)):
 			velocity.y = 100.0
 			_current_state = MoveState.AIR
 
@@ -714,18 +715,23 @@ func _physics_process(delta: float) -> void:
 	if _gun:
 		if GameManager and GameManager.is_armed(player_id) and not _is_dead:
 			_gun.visible = true
-			var mouse_pos = get_global_mouse_position()
 			_gun.position = _current_points["hand_r"]
-			var world_angle := (mouse_pos - _gun.global_position).angle()
-			_gun.global_rotation = world_angle
-			if mouse_pos.x < _gun.global_position.x:
+			if is_auth:
+				var mouse_pos = get_global_mouse_position()
+				var world_angle := (mouse_pos - _gun.global_position).angle()
+				_gun.global_rotation = world_angle
+				_aim_angle = world_angle
+			else:
+				_gun.global_rotation = _aim_angle
+			
+			if _gun.global_rotation > PI/2 or _gun.global_rotation < -PI/2:
 				_gun.scale.y = -1.0
 			else:
 				_gun.scale.y = 1.0
 		else:
 			_gun.visible = false
 
-	if GameManager and GameManager.is_armed(player_id) and not _is_dead:
+	if is_auth and GameManager and GameManager.is_armed(player_id) and not _is_dead:
 		if _cd <= 0.0 and (Input.is_action_just_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)):
 			_fire()
 
@@ -1143,11 +1149,6 @@ func _spawn_muzzle_flash_2d() -> void:
 
 
 func _fire() -> void:
-	_cd = fire_cooldown
-	_is_shooting = true
-	get_tree().create_timer(0.2).timeout.connect(func(): _is_shooting = false)
-	_spawn_muzzle_flash_2d()
-	
 	var target_id: int = 1 if player_id == 2 else 2
 	var space := get_world_2d().direct_space_state
 	var mouse_pos = get_global_mouse_position()
@@ -1156,22 +1157,34 @@ func _fire() -> void:
 	var query := PhysicsRayQueryParameters2D.create(global_position, global_position + dir_to_target * weapon_range)
 	query.exclude = [get_rid()]
 
-	_recoil_vel = -dir_to_target * 200.0 
-	
 	var hit := space.intersect_ray(query)
 	var hit_pos := global_position + dir_to_target * weapon_range
-	
+	var hit_normal := Vector2.UP
+	var hit_player := false
+
 	if not hit.is_empty():
 		hit_pos = hit.get("position")
-		var hit_normal = hit.get("normal", Vector2.UP)
+		hit_normal = hit.get("normal", Vector2.UP)
 		var collider = hit.get("collider")
 		if collider != null and collider.is_in_group("p%d_body_2d" % target_id):
+			hit_player = true
 			if GameManager:
 				GameManager.apply_damage(target_id, damage)
-			_spawn_blood_2d(hit_pos, hit_normal)
+	
+	rpc("_fire_rpc", hit_pos, hit_normal, hit_player, dir_to_target)
+
+@rpc("call_local", "any_peer")
+func _fire_rpc(hit_pos: Vector2, hit_normal: Vector2, hit_player: bool, dir_to_target: Vector2) -> void:
+	_cd = fire_cooldown
+	_is_shooting = true
+	get_tree().create_timer(0.2).timeout.connect(func(): _is_shooting = false)
+	_spawn_muzzle_flash_2d()
+	
+	_recoil_vel = -dir_to_target * 25.0
+	if hit_player:
+		_spawn_blood_2d(hit_pos, hit_normal)
 			
 	_draw_tracer_2d(global_position + dir_to_target * 16.0, hit_pos)
-
 
 func _spawn_blood_2d(pos: Vector2, normal: Vector2) -> void:
 	var particles := CPUParticles2D.new()

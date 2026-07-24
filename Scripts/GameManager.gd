@@ -62,6 +62,8 @@ func restart() -> void:
 
 
 func _start_random_timer() -> void:
+	if not multiplayer.has_multiplayer_peer() or not multiplayer.is_server():
+		return
 	_warned_this_cycle = false
 	var next_interval: float = randf_range(min_swap_time, max_swap_time)
 	timer.start(next_interval)
@@ -75,8 +77,14 @@ func _on_warning_timeout() -> void:
 	if _warned_this_cycle:
 		return
 	_warned_this_cycle = true
-	swap_incoming.emit(not is_3d_mode)
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		rpc("warning_rpc", not is_3d_mode)
+	else:
+		warning_rpc(not is_3d_mode)
 
+@rpc("call_local", "authority", "reliable")
+func warning_rpc(next_is_3d_mode: bool) -> void:
+	swap_incoming.emit(next_is_3d_mode)
 
 func _on_timer_timeout() -> void:
 	swap_dimension()
@@ -84,10 +92,20 @@ func _on_timer_timeout() -> void:
 
 ## Flip the active dimension. Public so a debug key can force it.
 func swap_dimension() -> void:
-	is_3d_mode = not is_3d_mode
+	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+		return # Only server decides to swap
+	if multiplayer.has_multiplayer_peer():
+		rpc("swap_dimension_rpc", not is_3d_mode)
+	else:
+		swap_dimension_rpc(not is_3d_mode)
+
+@rpc("call_local", "authority", "reliable")
+func swap_dimension_rpc(new_mode: bool) -> void:
+	is_3d_mode = new_mode
 	mode_changed.emit(is_3d_mode)
 	_play_state_change_cues(is_3d_mode)
-	_start_random_timer()
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		_start_random_timer()
 
 
 func _play_state_change_cues(_is_3d_mode: bool) -> void:

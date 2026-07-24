@@ -76,21 +76,39 @@ func get_weapon_name(w: int) -> String:
 
 func try_fire() -> void:
 	if cooldown > 0.0: return
+	
+	var cam := _player.get_viewport().get_camera_3d()
+	var cam_fwd: Vector3 = -cam.global_transform.basis.z if cam else -_player.global_transform.basis.z
+	cam_fwd = cam_fwd.normalized()
+
+	var screen_center := _player.get_viewport().get_visible_rect().size / 2.0
+	var cam_from  := cam.project_ray_origin(screen_center) if cam else _player.global_position
+	var target_pos := cam_from + cam_fwd * weapon_range
+
+	if cam:
+		var space := _player.get_world_3d().direct_space_state
+		var cq := PhysicsRayQueryParameters3D.create(cam_from, target_pos)
+		var exc := [_player.get_rid()]
+		for p in _player.get_tree().get_nodes_in_group("p1_body_3d") + \
+				 _player.get_tree().get_nodes_in_group("p2_body_3d"):
+			if p is CollisionObject3D and p != _player:
+				exc.append(p.get_rid())
+		cq.exclude = exc
+		var ch := space.intersect_ray(cq)
+		if ch: target_pos = ch.get("position")
+
 	if current_weapon == Weapon.BOMB:
-		throw_bomb()
+		rpc("throw_bomb_rpc", cam_fwd)
 		return
-	_fire()
+	rpc("do_fire_rpc", target_pos)
 
 
-func throw_bomb() -> void:
+@rpc("call_local", "any_peer")
+func throw_bomb_rpc(cam_fwd: Vector3) -> void:
 	cooldown   = 0.8
 	shoot_t    = 0.3
 	grenade_cd = 1.0
 
-	var cam := _player.get_viewport().get_camera_3d()
-	var cam_fwd: Vector3 = -cam.global_transform.basis.z if cam else \
-		-_player.global_transform.basis.z
-	cam_fwd = cam_fwd.normalized()
 	var spawn_pos := _player.global_position + Vector3.UP * 1.4 + cam_fwd * 0.6
 
 	var bomb := RigidBody3D.new()
@@ -150,6 +168,14 @@ func throw_bomb() -> void:
 
 
 func do_melee(rig: Node3D) -> void:
+	rpc("do_melee_rpc")
+
+@rpc("call_local", "any_peer")
+func do_melee_rpc() -> void:
+	if not _player or not is_instance_valid(_player): return
+	var rig = _player.get("_skeleton").get("rig") if _player.has_method("_skeleton") else null
+	if not rig and _player.get("_skeleton"): rig = _player.get("_skeleton").get("rig")
+	if not rig: return
 	var space := _player.get_world_3d().direct_space_state
 	var mpos  := _player.global_position + Vector3(0, 1.0, 0)
 	var dir   := -rig.global_transform.basis.z
@@ -174,7 +200,8 @@ func do_melee(rig: Node3D) -> void:
 
 
 # ── Private fire ──────────────────────────────────────────────────────────────
-func _fire() -> void:
+@rpc("call_local", "any_peer")
+func do_fire_rpc(target_pos: Vector3) -> void:
 	var w_dmg: float
 	var w_cd:  float
 	var is_shotgun := false
@@ -217,22 +244,7 @@ func _fire() -> void:
 		+ _player.global_transform.basis.x * 0.4 \
 		- _player.global_transform.basis.z * 0.4
 
-	var screen_center := _player.get_viewport().get_visible_rect().size / 2.0
-	var cam_from  := cam.project_ray_origin(screen_center) if cam else _player.global_position
-	var cam_fwd   := cam.project_ray_normal(screen_center) if cam else -_player.global_transform.basis.z
-	var target_pos := cam_from + cam_fwd * weapon_range
-
 	if cam:
-		var cq := PhysicsRayQueryParameters3D.create(cam_from, target_pos)
-		var exc := [_player.get_rid()]
-		for p in _player.get_tree().get_nodes_in_group("p1_body_3d") + \
-				 _player.get_tree().get_nodes_in_group("p2_body_3d"):
-			if p is CollisionObject3D and p != _player:
-				exc.append(p.get_rid())
-		cq.exclude = exc
-		var ch := space.intersect_ray(cq)
-		if ch: target_pos = ch.get("position")
-
 		var cur_pitch = cam.get("_pitch")
 		if cur_pitch != null:
 			cam.set("_pitch", cur_pitch + (2.5 if is_shotgun else 1.5))

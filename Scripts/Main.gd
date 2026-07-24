@@ -20,10 +20,83 @@ const P2_3D_SPAWN := Vector3(8, 0.9, -8)
 const P1_2D_SPAWN := Vector2(-300, 280)
 const P2_2D_SPAWN := Vector2(300, -280)
 
+var _peer := ENetMultiplayerPeer.new()
+var _lobby: CanvasLayer
+var _client_peer_id := 1
+const PORT = 11223
+
 func _ready() -> void:
+	_lobby = load("res://Scripts/Multiplayer/Lobby.gd").new()
+	_lobby.host_requested.connect(_on_host_requested)
+	_lobby.join_requested.connect(_on_join_requested)
+	add_child(_lobby)
+
+func _on_host_requested() -> void:
+	var err = _peer.create_server(PORT)
+	if err != OK:
+		_lobby.set_status("Failed to host on port " + str(PORT))
+		return
+	
+	multiplayer.multiplayer_peer = _peer
+	multiplayer.peer_connected.connect(_on_peer_connected)
+	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	
+	_lobby.set_status("Hosting on port " + str(PORT) + ". Waiting for player...")
+
+func _on_join_requested(ip: String) -> void:
+	var err = _peer.create_client(ip, PORT)
+	if err != OK:
+		_lobby.set_status("Failed to create client.")
+		return
+	
+	multiplayer.multiplayer_peer = _peer
+	multiplayer.connected_to_server.connect(_on_connected_ok)
+	multiplayer.connection_failed.connect(_on_connected_fail)
+	multiplayer.server_disconnected.connect(_on_server_disconnected)
+	
+	_lobby.set_status("Connecting to " + ip + "...")
+
+func _on_peer_connected(id: int) -> void:
+	print("Peer connected: ", id)
+	_client_peer_id = id
+	_start_game()
+
+func _on_peer_disconnected(id: int) -> void:
+	print("Peer disconnected: ", id)
+
+func _on_connected_ok() -> void:
+	print("Connected to server successfully!")
+	_start_game()
+
+func _on_connected_fail() -> void:
+	_lobby.set_status("Connection failed.")
+	multiplayer.multiplayer_peer = null
+
+func _on_server_disconnected() -> void:
+	print("Server disconnected.")
+
+func _start_game() -> void:
+	if _lobby:
+		_lobby.queue_free()
+		_lobby = null
+		
 	_build_3d_environment()
 	_build_2d_environment()
 	_build_hud()
+	
+	var is_host = multiplayer.is_server()
+	var p2_id = _client_peer_id if is_host else multiplayer.get_unique_id()
+	
+	p1_3d.set_multiplayer_authority(1)
+	p1_2d.set_multiplayer_authority(1)
+	p2_3d.set_multiplayer_authority(p2_id)
+	p2_2d.set_multiplayer_authority(p2_id)
+	
+	var local_3d = p1_3d if is_host else p2_3d
+	var local_2d = p1_2d if is_host else p2_2d
+	
+	env_3d.get_node("Camera3D").set("target", local_3d)
+	env_2d.get_node("Camera2D").set("target", local_2d)
 	
 	GameManager.mode_changed.connect(_on_mode_changed)
 	_on_mode_changed(GameManager.is_3d_mode)
@@ -72,6 +145,7 @@ func _on_mode_changed(is_3d_mode: bool) -> void:
 			p2_2d.velocity = Vector2.ZERO
 
 	# Toggle environments
+
 	if env_3d:
 		env_3d.visible = is_3d_mode
 		env_3d.process_mode = Node.PROCESS_MODE_INHERIT if is_3d_mode else Node.PROCESS_MODE_DISABLED
@@ -285,13 +359,19 @@ func _make_player_3d(pid: int, hunter: bool, pos: Vector3, col: Color) -> Charac
 	cap_shape.height = 1.8
 	var cs := CollisionShape3D.new()
 	cs.shape = cap_shape
-	# Capsule origin is at center. Height=1.8 means half=0.9.
-	# Position at 0.9 puts the bottom of the capsule exactly at Y=0 (the floor).
 	cs.position = Vector3(0, 0.9, 0)
 	player.add_child(cs)
 
-	# The visible body is a procedural humanoid rig built by Player3D.gd itself
-	# (see _build_rig) — no placeholder mesh needed here.
+	var sync := MultiplayerSynchronizer.new()
+	sync.name = "MultiplayerSynchronizer"
+	var config := SceneReplicationConfig.new()
+	config.add_property(NodePath(".:position"))
+	config.add_property(NodePath(".:rotation"))
+	config.add_property(NodePath(".:velocity"))
+	config.add_property(NodePath(".:_visual_yaw"))
+	sync.replication_config = config
+	player.add_child(sync)
+
 	return player
 
 # ====================================================================
@@ -377,6 +457,16 @@ func _make_player_2d(pid: int, assassin: bool, pos: Vector2, col: Color) -> Char
 	vis.position = Vector2(-16, -30)
 	vis.color = col
 	player.add_child(vis)
+
+	var sync := MultiplayerSynchronizer.new()
+	sync.name = "MultiplayerSynchronizer"
+	var config := SceneReplicationConfig.new()
+	config.add_property(NodePath(".:position"))
+	config.add_property(NodePath(".:rotation"))
+	config.add_property(NodePath(".:velocity"))
+	config.add_property(NodePath(".:_aim_angle"))
+	sync.replication_config = config
+	player.add_child(sync)
 
 	return player
 

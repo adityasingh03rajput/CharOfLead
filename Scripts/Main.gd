@@ -21,12 +21,116 @@ const P1_2D_SPAWN := Vector2(-300, 280)
 const P2_2D_SPAWN := Vector2(300, -280)
 
 func _ready() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var menu = (load("res://Scripts/MainMenu.gd") as GDScript).new()
+	add_child(menu)
+	menu.play_requested.connect(_start_game)
+
+
+func _start_game() -> void:
 	_build_3d_environment()
 	_build_2d_environment()
 	_build_hud()
-	
 	GameManager.mode_changed.connect(_on_mode_changed)
 	_on_mode_changed(GameManager.is_3d_mode)
+	GameManager.match_restarted.connect(_on_match_restarted)
+	if NetworkManager.is_online:
+		_setup_network_authorities()
+		NetworkManager.notify_client_ready()
+		if not NetworkManager.peer_disconnected.is_connected(_on_peer_disconnected):
+			NetworkManager.peer_disconnected.connect(_on_peer_disconnected)
+		if NetworkManager.is_host and not NetworkManager.client_ready_for_sync.is_connected(_on_client_ready_for_sync):
+			NetworkManager.client_ready_for_sync.connect(_on_client_ready_for_sync)
+
+
+func _on_match_restarted() -> void:
+	if p1_3d: p1_3d.global_position = P1_3D_SPAWN; p1_3d.velocity = Vector3.ZERO; p1_3d._is_dead = false
+	if p2_3d: p2_3d.global_position = P2_3D_SPAWN; p2_3d.velocity = Vector3.ZERO; p2_3d._is_dead = false
+	if p1_2d: p1_2d.global_position = P1_2D_SPAWN; p1_2d.velocity = Vector2.ZERO; p1_2d._is_dead = false
+	if p2_2d: p2_2d.global_position = P2_2D_SPAWN; p2_2d.velocity = Vector2.ZERO; p2_2d._is_dead = false
+	if GameManager.is_3d_mode:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _on_peer_disconnected() -> void:
+	if NetworkManager and NetworkManager.is_host:
+		NetworkManager.is_game_started = false
+		if hud and hud.has_node("ModeLabel"):
+			var lbl = hud.get_node("ModeLabel") as Label
+			if lbl:
+				lbl.text = "⚠️ PLAYER DISCONNECTED — ROOM STILL OPEN FOR RECONNECT!"
+		return
+	if NetworkManager:
+		NetworkManager.stop()
+	get_tree().reload_current_scene()
+
+
+func _on_client_ready_for_sync(peer_id: int) -> void:
+	if not NetworkManager or not NetworkManager.is_host: return
+	_setup_network_authorities()
+	NetworkManager.is_game_started = true
+	_on_mode_changed(GameManager.is_3d_mode)
+	
+	var is_3d := GameManager.is_3d_mode
+	var hp1   := GameManager.get_health(1)
+	var hp2   := GameManager.get_health(2)
+	var p1_3d_pos := p1_3d.global_position if p1_3d else Vector3.ZERO
+	var p2_3d_pos := p2_3d.global_position if p2_3d else Vector3.ZERO
+	var p1_2d_pos := p1_2d.global_position if p1_2d else Vector2.ZERO
+	var p2_2d_pos := p2_2d.global_position if p2_2d else Vector2.ZERO
+	
+	if peer_id != 0:
+		rpc_id(peer_id, "_rpc_sync_full_match_state", is_3d, hp1, hp2, p1_3d_pos, p2_3d_pos, p1_2d_pos, p2_2d_pos)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_sync_full_match_state(is_3d: bool, hp1: float, hp2: float, p1_3d_pos: Vector3, p2_3d_pos: Vector3, p1_2d_pos: Vector2, p2_2d_pos: Vector2) -> void:
+	GameManager.is_3d_mode = is_3d
+	_on_mode_changed(is_3d)
+	GameManager._health[1] = hp1
+	GameManager._health[2] = hp2
+	GameManager.health_changed.emit(1, hp1, GameManager.max_health)
+	GameManager.health_changed.emit(2, hp2, GameManager.max_health)
+	
+	if p1_3d: p1_3d.global_position = p1_3d_pos
+	if p2_3d: p2_3d.global_position = p2_3d_pos
+	if p1_2d: p1_2d.global_position = p1_2d_pos
+	if p2_2d: p2_2d.global_position = p2_2d_pos
+	
+	NetworkManager.is_game_started = true
+
+
+func _setup_network_authorities() -> void:
+	var host_pid   := NetworkManager.local_pid if NetworkManager.is_host else (3 - NetworkManager.local_pid)
+	var client_pid := 3 - host_pid
+	var client_peer := (NetworkManager.remote_peer_id if NetworkManager.is_host
+			else multiplayer.get_unique_id())
+
+	_node_for_pid_3d(host_pid).set_multiplayer_authority(1)
+	_node_for_pid_2d(host_pid).set_multiplayer_authority(1)
+	_node_for_pid_3d(client_pid).set_multiplayer_authority(client_peer)
+	_node_for_pid_2d(client_pid).set_multiplayer_authority(client_peer)
+
+	var local_3d := _node_for_pid_3d(NetworkManager.local_pid)
+	var local_2d := _node_for_pid_2d(NetworkManager.local_pid)
+
+	if env_3d:
+		var cam3d = env_3d.get_node_or_null("Camera3D")
+		if cam3d:
+			cam3d.set("target", local_3d)
+
+	if env_2d:
+		var cam2d = env_2d.get_node_or_null("Camera2D")
+		if cam2d:
+			cam2d.set("target", local_2d)
+
+
+func _node_for_pid_3d(pid: int) -> Node:
+	return p1_3d if pid == 1 else p2_3d
+
+
+func _node_for_pid_2d(pid: int) -> Node:
+	return p1_2d if pid == 1 else p2_2d
 
 
 func _on_mode_changed(is_3d_mode: bool) -> void:

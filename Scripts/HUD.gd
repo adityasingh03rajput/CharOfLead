@@ -28,11 +28,14 @@ var _help_panel: PanelContainer
 var _help_visible: bool = false
 
 
+var _rematch_modal: PanelContainer
+
 func _ready() -> void:
 	GameManager.health_changed.connect(_on_health_changed)
 	GameManager.mode_changed.connect(_on_mode_changed)
 	GameManager.swap_incoming.connect(_on_swap_incoming)
 	GameManager.game_over.connect(_on_game_over)
+	GameManager.match_restarted.connect(_on_match_restarted)
 	GameManager.damage_dealt.connect(_on_damage_dealt)
 	GameManager.weapon_changed.connect(_on_weapon_changed)
 
@@ -118,9 +121,100 @@ func _do_flash(rgb: Color) -> void:
 
 
 func _on_game_over(winner_id: int) -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	if winner_label:
-		winner_label.visible = true
-		winner_label.text = "PLAYER %d WINS!" % winner_id
+		winner_label.visible = false # replaced by full rematch modal window
+	_show_rematch_modal(winner_id)
+
+
+func _on_match_restarted() -> void:
+	if _rematch_modal:
+		_rematch_modal.visible = false
+
+
+func _show_rematch_modal(winner_id: int) -> void:
+	if not _rematch_modal:
+		_rematch_modal = PanelContainer.new()
+		_rematch_modal.name = "RematchModal"
+		_rematch_modal.set_anchors_preset(Control.PRESET_CENTER)
+		_rematch_modal.custom_minimum_size = Vector2(440, 260)
+		_rematch_modal.position = Vector2(-220, -130)
+
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.08, 0.08, 0.14, 0.95)
+		style.border_width_left = 2; style.border_width_right = 2
+		style.border_width_top = 2; style.border_width_bottom = 2
+		style.border_color = Color(0.2, 0.7, 0.9, 0.8)
+		style.corner_radius_top_left = 12; style.corner_radius_top_right = 12
+		style.corner_radius_bottom_left = 12; style.corner_radius_bottom_right = 12
+		_rematch_modal.add_theme_stylebox_override("panel", style)
+
+		var margin := MarginContainer.new()
+		margin.add_theme_constant_override("margin_left", 24)
+		margin.add_theme_constant_override("margin_top", 20)
+		margin.add_theme_constant_override("margin_right", 24)
+		margin.add_theme_constant_override("margin_bottom", 20)
+		_rematch_modal.add_child(margin)
+
+		var vbox := VBoxContainer.new()
+		vbox.name = "VBox"
+		vbox.add_theme_constant_override("separation", 16)
+		vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+		margin.add_child(vbox)
+
+		var title := Label.new()
+		title.name = "Title"
+		title.add_theme_font_size_override("font_size", 24)
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		vbox.add_child(title)
+
+		var sub := Label.new()
+		sub.text = "MATCH FINISHED"
+		sub.add_theme_font_size_override("font_size", 12)
+		sub.add_theme_color_override("font_color", Color(0.6, 0.6, 0.75))
+		sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		vbox.add_child(sub)
+
+		var hbox := HBoxContainer.new()
+		hbox.add_theme_constant_override("separation", 16)
+		hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+		vbox.add_child(hbox)
+
+		var rematch_btn := Button.new()
+		rematch_btn.text = "▶  REMATCH"
+		rematch_btn.custom_minimum_size = Vector2(160, 48)
+		rematch_btn.add_theme_font_size_override("font_size", 16)
+		rematch_btn.pressed.connect(func():
+			_rematch_modal.visible = false
+			if GameManager:
+				GameManager.request_rematch()
+		)
+		hbox.add_child(rematch_btn)
+
+		var menu_btn := Button.new()
+		menu_btn.text = "🏠  MAIN MENU"
+		menu_btn.custom_minimum_size = Vector2(160, 48)
+		menu_btn.add_theme_font_size_override("font_size", 16)
+		menu_btn.pressed.connect(func():
+			_rematch_modal.visible = false
+			var nm = get_node_or_null("/root/NetworkManager")
+			if nm: nm.stop()
+			get_tree().reload_current_scene()
+		)
+		hbox.add_child(menu_btn)
+
+		add_child(_rematch_modal)
+
+	var title_lbl := _rematch_modal.get_node("MarginContainer/VBox/Title") as Label
+	if title_lbl:
+		if winner_id == 1:
+			title_lbl.text = "🔴 RED SOLDIER WINS!"
+			title_lbl.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2))
+		else:
+			title_lbl.text = "🔵 BLUE ASSASSIN WINS!"
+			title_lbl.add_theme_color_override("font_color", Color(0.25, 0.6, 1.0))
+
+	_rematch_modal.visible = true
 
 
 func _unhandled_input(event: InputEvent) -> void:

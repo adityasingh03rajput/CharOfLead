@@ -24,6 +24,11 @@ signal weapon_changed(player_id, weapon_name)
 
 var is_3d_mode: bool = true
 
+# Stubs consumed by MainMenu.gd; online PvP ignores ai_mode entirely.
+var ai_mode:       bool = false
+var ai_plays_as:   int  = 0
+var ai_difficulty: int  = 1
+
 var timer: Timer
 var _warning_timer: Timer
 var _warned_this_cycle: bool = false
@@ -62,6 +67,12 @@ func restart() -> void:
 
 
 func _start_random_timer() -> void:
+	var nm = get_node_or_null("/root/NetworkManager")
+	if nm and nm.is_online and not nm.is_host:
+		timer.stop()
+		_warning_timer.stop()
+		return
+
 	_warned_this_cycle = false
 	var next_interval: float = randf_range(min_swap_time, max_swap_time)
 	timer.start(next_interval)
@@ -72,10 +83,22 @@ func _start_random_timer() -> void:
 
 
 func _on_warning_timeout() -> void:
+	var nm = get_node_or_null("/root/NetworkManager")
+	if nm and nm.is_online and not nm.is_host:
+		return
 	if _warned_this_cycle:
 		return
 	_warned_this_cycle = true
 	swap_incoming.emit(not is_3d_mode)
+	if nm and nm.is_online:
+		rpc("_rpc_sync_warning", not is_3d_mode)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_sync_warning(next_is_3d: bool) -> void:
+	if not is_inside_tree(): return
+	_warned_this_cycle = true
+	swap_incoming.emit(next_is_3d)
 
 
 func _on_timer_timeout() -> void:
@@ -83,11 +106,27 @@ func _on_timer_timeout() -> void:
 
 
 ## Flip the active dimension. Public so a debug key can force it.
+## Online: only the host triggers the swap; the result is RPC'd to the client.
 func swap_dimension() -> void:
+	var nm = get_node_or_null("/root/NetworkManager")
+	if nm and nm.is_online and not nm.is_host:
+		return
 	is_3d_mode = not is_3d_mode
 	mode_changed.emit(is_3d_mode)
 	_play_state_change_cues(is_3d_mode)
+	_warned_this_cycle = false
+	if nm and nm.is_online:
+		rpc("_rpc_sync_swap", is_3d_mode)
 	_start_random_timer()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_sync_swap(mode: bool) -> void:
+	if not is_inside_tree(): return
+	is_3d_mode = mode
+	mode_changed.emit(is_3d_mode)
+	_play_state_change_cues(is_3d_mode)
+	_warned_this_cycle = false
 
 
 func _play_state_change_cues(_is_3d_mode: bool) -> void:
@@ -117,9 +156,23 @@ func apply_damage(target_id: int, amount: float) -> void:
 	_health[target_id] = clampf(_health[target_id] - amount, 0.0, max_health)
 	health_changed.emit(target_id, _health[target_id], max_health)
 	damage_dealt.emit(target_id, amount)
+	var nm = get_node_or_null("/root/NetworkManager")
+	if nm and nm.is_online:
+		rpc("_rpc_sync_health", target_id, _health[target_id])
 	if _health[target_id] <= 0.0:
 		_end_game(target_id)
 
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_sync_health(pid: int, hp: float) -> void:
+	if not is_inside_tree() or _is_over: return
+	_health[pid] = hp
+	health_changed.emit(pid, hp, max_health)
+	if hp <= 0.0:
+		_end_game(pid)
+
+
+signal match_restarted
 
 func _end_game(dead_id: int) -> void:
 	_is_over = true
@@ -128,6 +181,32 @@ func _end_game(dead_id: int) -> void:
 	var winner_id: int = 2 if dead_id == 1 else 1
 	player_died.emit(dead_id)
 	game_over.emit(winner_id)
+
+
+func request_rematch() -> void:
+	var nm = get_node_or_null("/root/NetworkManager")
+	if nm and nm.is_online:
+		rpc("_rpc_sync_rematch")
+	restart_match()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_sync_rematch() -> void:
+	if not is_inside_tree(): return
+	restart_match()
+
+
+func restart_match() -> void:
+	_is_over = false
+	_health[1] = max_health
+	_health[2] = max_health
+	is_3d_mode = true
+	_warned_this_cycle = false
+	health_changed.emit(1, max_health, max_health)
+	health_changed.emit(2, max_health, max_health)
+	mode_changed.emit(true)
+	_start_random_timer()
+	match_restarted.emit()
 
 
 func pop_weapon_name(player_id: int, weapon_name: String) -> void:

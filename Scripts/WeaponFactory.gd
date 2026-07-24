@@ -225,10 +225,9 @@ func _fire() -> void:
 	if cam:
 		var cq := PhysicsRayQueryParameters3D.create(cam_from, target_pos)
 		var exc := [_player.get_rid()]
-		for p in _player.get_tree().get_nodes_in_group("p1_body_3d") + \
-				 _player.get_tree().get_nodes_in_group("p2_body_3d"):
-			if p is CollisionObject3D and p != _player:
-				exc.append(p.get_rid())
+		for child in _player.get_children():
+			if child is CollisionObject3D:
+				exc.append(child.get_rid())
 		cq.exclude = exc
 		var ch := space.intersect_ray(cq)
 		if ch: target_pos = ch.get("position")

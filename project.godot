@@ -25,6 +25,7 @@ boot_splash/show_image=false
 [autoload]
 
 GameManager="*res://Scripts/GameManager.gd"
+NetworkManager="*res://Scripts/NetworkManager.gd"
 
 [display]
 

@@ -97,11 +97,18 @@ func _process(delta: float) -> void:
 		return
 
 	if Input.is_physical_key_pressed(KEY_G):
-		if is_3d:
-			if owner_id == 1:
+		if NetworkManager and NetworkManager.is_online:
+			var local_pid := NetworkManager.local_pid
+			if is_3d and local_pid == 1:
+				explode()
+			elif not is_3d and local_pid == 2:
 				explode()
 		else:
-			explode()
+			if is_3d:
+				if owner_id == 1:
+					explode()
+			else:
+				explode()
 
 func _update_marker_2d() -> void:
 	if _prompt_label:

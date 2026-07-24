@@ -87,19 +87,24 @@ var _pouch: Polygon2D
 
 var _ghost_t: float = 0.0
 
+# Online sync targets (set by _net_sync RPC on the non-authority side)
+var _net_target_pos: Vector2 = Vector2.ZERO
+var _net_target_vel: Vector2 = Vector2.ZERO
+
 var _anim_time: float = 0.0
 var _current_points: Dictionary = {}
 var _target_points: Dictionary = {}
 var _pt_names = ["head", "neck", "hip", "elbow_l", "hand_l", "elbow_r", "hand_r", "knee_l", "foot_l", "knee_r", "foot_r"]
 var _facing_right: bool = true
 
-@onready var _act_left: String = "p%d_left" % player_id
-@onready var _act_right: String = "p%d_right" % player_id
-@onready var _act_up: String = "p%d_up" % player_id
-@onready var _act_down: String = "p%d_down" % player_id
-@onready var _act_jump: String = "p%d_jump" % player_id
-@onready var _act_fire: String = "p%d_fire" % player_id
-@onready var _act_grapple: String = "p%d_grapple" % player_id
+@onready var _input_pid: int = 1 if (NetworkManager and NetworkManager.is_online) else player_id
+@onready var _act_left: String = "p%d_left" % _input_pid
+@onready var _act_right: String = "p%d_right" % _input_pid
+@onready var _act_up: String = "p%d_up" % _input_pid
+@onready var _act_down: String = "p%d_down" % _input_pid
+@onready var _act_jump: String = "p%d_jump" % _input_pid
+@onready var _act_fire: String = "p%d_fire" % _input_pid
+@onready var _act_grapple: String = "p%d_grapple" % _input_pid
 
 
 func _ready() -> void:
@@ -583,7 +588,25 @@ func _on_game_over(winner_id: int) -> void:
 		_has_won = true
 
 
+@rpc("any_peer", "unreliable_ordered")
+func _net_sync(pos: Vector2, vel: Vector2) -> void:
+	if not is_inside_tree() or is_multiplayer_authority(): return
+	_net_target_pos = pos
+	_net_target_vel = vel
+
+
 func _physics_process(delta: float) -> void:
+	if NetworkManager.is_online and not is_multiplayer_authority():
+		# Interpolate toward received position; approximate animation from velocity.
+		global_position = global_position.lerp(_net_target_pos, minf(1.0, 18.0 * delta))
+		velocity        = _net_target_vel
+		var move_x := velocity.x / speed if absf(velocity.x) > 1.0 else 0.0
+		var running := velocity.length() > speed * 1.1
+		_animate_stickman(delta, move_x, running, false)
+		_update_facing(move_x)
+		_update_grapple_visuals()
+		return
+
 	if _cd > 0.0:
 		_cd -= delta
 
@@ -607,7 +630,7 @@ func _physics_process(delta: float) -> void:
 
 	var input_x = Input.get_axis(_act_left, _act_right)
 	var input_y = Input.get_axis(_act_up, _act_down)
-	var is_running := Input.is_key_pressed(KEY_SHIFT) if player_id == 1 else Input.is_key_pressed(KEY_CTRL)
+	var is_running := Input.is_key_pressed(KEY_SHIFT) if _input_pid == 1 else Input.is_key_pressed(KEY_CTRL)
 	var is_crouching := Input.is_action_pressed(_act_down)
 
 	# --- Grapple (victim only): F toggles aim, Ctrl+WASD steers reticle, F fires,
@@ -693,6 +716,9 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
+	if NetworkManager and NetworkManager.is_online and NetworkManager.is_game_started:
+		rpc("_net_sync", global_position, velocity)
+
 	# Arrival / stuck detection for the zip (position is now updated).
 	if zipping:
 		if global_position.distance_to(_anchor) <= arrival_dist or is_on_wall():
@@ -761,7 +787,7 @@ func _update_facing(move_dir: float) -> void:
 		_facing_right = false
 	elif _current_state == MoveState.WALL_RIGHT:
 		_facing_right = true
-	elif GameManager and GameManager.is_armed(player_id):
+	elif GameManager and GameManager.is_armed(player_id) and (not (NetworkManager and NetworkManager.is_online) or is_multiplayer_authority()):
 		var mouse_pos = get_global_mouse_position()
 		_facing_right = mouse_pos.x > global_position.x
 	else:
@@ -1016,17 +1042,20 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 
 	# --- AIM & WEAPON LAYER ---
 	var is_armed = GameManager and GameManager.is_armed(player_id)
+	var is_local := not (NetworkManager and NetworkManager.is_online) or is_multiplayer_authority()
 	if is_armed and not _is_dead and not _has_won:
-		var mouse_pos = get_global_mouse_position()
-		# Localize mouse position to the skeleton to respect wall rotations
-		var local_mouse = _skeleton.to_local(mouse_pos)
-		
-		# If facing left, the X coordinates are currently positive and will be flipped later.
-		# Flip the target X so our aim vector calculates correctly on the positive side.
-		if not _facing_right:
-			local_mouse.x *= -1.0
+		var aim_vec := Vector2.RIGHT
+		if is_local:
+			var mouse_pos = get_global_mouse_position()
+			# Localize mouse position to the skeleton to respect wall rotations
+			var local_mouse = _skeleton.to_local(mouse_pos)
 			
-		var aim_vec = (local_mouse - tp["neck"]).normalized()
+			# If facing left, the X coordinates are currently positive and will be flipped later.
+			# Flip the target X so our aim vector calculates correctly on the positive side.
+			if not _facing_right:
+				local_mouse.x *= -1.0
+				
+			aim_vec = (local_mouse - tp["neck"]).normalized()
 		
 		# Gun Arm (Right Arm) completely independent, pointing at target
 		var arm_len = 24.0

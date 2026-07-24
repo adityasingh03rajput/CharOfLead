@@ -108,7 +108,8 @@ func compute(delta: float, moving: bool, running: bool, crouching: bool,
 		sway_x += randf_range(-0.04, 0.04) * recoil
 		sway_y += recoil * 0.10
 
-	if is_aiming and not has_won:
+	var is_local := not (NetworkManager and NetworkManager.is_online) or (_player and _player.is_multiplayer_authority())
+	if is_aiming and not has_won and is_local:
 		var cam := _player.get_viewport().get_camera_3d()
 		if cam:
 			var cam_fwd    := -cam.global_transform.basis.z

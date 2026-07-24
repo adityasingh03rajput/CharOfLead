@@ -157,10 +157,10 @@ func _physics_process(delta: float) -> void:
 	# Free Fire aim-down-sights: detect which player we're following and use their fire action
 	var ads_input := false
 	if target:
-		var player_id := 1
-		if target.has_method("get") and target.get("player_id") != null:
-			player_id = target.get("player_id")
-		var fire_action := "p%d_fire" % player_id
+		var pid := 1
+		if not (NetworkManager and NetworkManager.is_online) and target.has_method("get") and target.get("player_id") != null:
+			pid = target.get("player_id")
+		var fire_action := "p%d_fire" % pid
 		ads_input = Input.is_action_pressed(fire_action) or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	_ads = third_person and ads_input
 

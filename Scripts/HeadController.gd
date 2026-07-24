@@ -48,7 +48,8 @@ func contribute(tp: Dictionary, delta: float, moving: bool,
 	var target_yaw   := 0.0
 	var target_pitch := 0.0
 
-	if cam:
+	var is_local := not (NetworkManager and NetworkManager.is_online) or (_player and _player.is_multiplayer_authority())
+	if is_local and cam:
 		var cam_fwd   := -cam.global_transform.basis.z
 		var world_yaw := atan2(-cam_fwd.x, -cam_fwd.z)
 		var raw_yaw   := wrapf(world_yaw - rig_yaw, -PI, PI)

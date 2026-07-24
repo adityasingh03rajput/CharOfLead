@@ -57,12 +57,13 @@ static var clone_counter:  int   = 0
 var _selector_ui: CanvasLayer
 
 # ── Input action strings ──────────────────────────────────────────────────────
-@onready var _act_up:    String = "p%d_up"    % player_id
-@onready var _act_down:  String = "p%d_down"  % player_id
-@onready var _act_left:  String = "p%d_left"  % player_id
-@onready var _act_right: String = "p%d_right" % player_id
-@onready var _act_jump:  String = "p%d_jump"  % player_id
-@onready var _act_fire:  String = "p%d_fire"  % player_id
+@onready var _input_pid: int = 1 if (NetworkManager and NetworkManager.is_online) else player_id
+@onready var _act_up:    String = "p%d_up"    % _input_pid
+@onready var _act_down:  String = "p%d_down"  % _input_pid
+@onready var _act_left:  String = "p%d_left"  % _input_pid
+@onready var _act_right: String = "p%d_right" % _input_pid
+@onready var _act_jump:  String = "p%d_jump"  % _input_pid
+@onready var _act_fire:  String = "p%d_fire"  % _input_pid
 
 # ── Sub-systems (Node3D to avoid class_name resolution at script-load time) ───
 var _skeleton:  Node3D
@@ -185,6 +186,10 @@ func _rig() -> Node3D:
 # PHYSICS / INPUT
 # ====================================================================
 func _physics_process(delta: float) -> void:
+	if NetworkManager.is_online and not is_multiplayer_authority():
+		_remote_anim(delta)
+		return
+
 	if _is_dead: return
 
 	_weapon.call("tick", delta)
@@ -265,7 +270,7 @@ func _physics_process(delta: float) -> void:
 		if Input.is_physical_key_pressed(KEY_4) and not q: _weapon.call("set_weapon", WPN_BOMB)
 
 	# Melee
-	var melee_pressed := Input.is_physical_key_pressed(KEY_F) if player_id == 1 else (
+	var melee_pressed := Input.is_physical_key_pressed(KEY_F) if _input_pid == 1 else (
 		Input.is_action_just_pressed(_act_fire) or
 		Input.is_physical_key_pressed(KEY_ENTER) or
 		Input.is_physical_key_pressed(KEY_M))
@@ -303,8 +308,8 @@ func _physics_process(delta: float) -> void:
 		var shoot_t: float = _weapon.get("shoot_t")
 		if is_aiming or shoot_t > 0.0:
 			var ty := atan2(-cf.x, -cf.z)
-			_visual_yaw = lerp_angle(_visual_yaw, ty, 25.0 * delta)
-			if _rig(): _rig().rotation.y = lerp_angle(_rig().rotation.y, _visual_yaw, 25.0 * delta)
+			_visual_yaw = lerp_angle(_visual_yaw, ty, 35.0 * delta)
+			if _rig(): _rig().rotation.y = _visual_yaw
 		elif input_dir != Vector2.ZERO:
 			var ty := atan2(-target_vel.x, -target_vel.z)
 			_visual_yaw = lerp_angle(_visual_yaw, ty, turn_speed * delta)
@@ -364,16 +369,44 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
+	if NetworkManager and NetworkManager.is_online and NetworkManager.is_game_started:
+		rpc("_net_sync", global_position, velocity, _visual_yaw)
+
+
+func _remote_anim(delta: float) -> void:
+	var moving  := velocity.length_squared() > 0.5
+	var running := velocity.length() > walk_speed + 0.5
+	var rig_yaw := (_rig().rotation.y if _rig() else 0.0)
+	if _walk: _walk.call("advance", delta, moving, running)
+	var tp = {}
+	if _anim:
+		tp = _anim.call("compute", delta, moving, running,
+				false, false, _is_dead, _has_won, 0.0, _visual_yaw, rig_yaw)
+		if not tp is Dictionary: tp = {}
+	if _spine:     _spine.call("contribute", tp, delta, moving, running, false, _is_dead, _has_won)
+	if _head_ctrl: _head_ctrl.call("contribute", tp, delta, moving, _is_dead, _has_won, rig_yaw)
+	if _secondary: _secondary.call("contribute", tp, delta)
+	if _anim:      _anim.call("apply_pose", tp, delta)
+
+
+@rpc("any_peer", "unreliable_ordered")
+func _net_sync(pos: Vector3, vel: Vector3, vis_yaw: float) -> void:
+	if not is_inside_tree() or is_multiplayer_authority(): return
+	global_position = pos
+	velocity        = vel
+	_visual_yaw     = vis_yaw
+	if _rig(): _rig().rotation.y = vis_yaw
+
 
 func _get_run_input() -> bool:
-	if InputMap.has_action("p%d_run" % player_id):
-		return Input.is_action_pressed("p%d_run" % player_id)
-	return Input.is_key_pressed(KEY_SHIFT) if player_id == 1 else Input.is_key_pressed(KEY_CTRL)
+	if InputMap.has_action("p%d_run" % _input_pid):
+		return Input.is_action_pressed("p%d_run" % _input_pid)
+	return Input.is_key_pressed(KEY_SHIFT) if _input_pid == 1 else Input.is_key_pressed(KEY_CTRL)
 
 func _get_crouch_input() -> bool:
-	if InputMap.has_action("p%d_crouch" % player_id):
-		return Input.is_action_pressed("p%d_crouch" % player_id)
-	return Input.is_key_pressed(KEY_ALT) if player_id == 1 else Input.is_key_pressed(KEY_TAB)
+	if InputMap.has_action("p%d_crouch" % _input_pid):
+		return Input.is_action_pressed("p%d_crouch" % _input_pid)
+	return Input.is_key_pressed(KEY_ALT) if _input_pid == 1 else Input.is_key_pressed(KEY_TAB)
 
 
 # ====================================================================
@@ -420,6 +453,7 @@ func _on_game_over(winner_id: int) -> void:
 # INPUT — scroll wheel weapon swap
 # ====================================================================
 func _unhandled_input(event: InputEvent) -> void:
+	if NetworkManager and NetworkManager.is_online and not is_multiplayer_authority(): return
 	if _is_dead or is_idle_clone: return
 
 	if is_hunter and GameManager and GameManager.is_armed(player_id) \

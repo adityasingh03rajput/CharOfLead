@@ -58,6 +58,19 @@ var _reticle: Node2D
 const POSE_IDLE     := 1
 const POSE_CROUCH   := 2
 const POSE_WALK     := 3
+
+
+func reset_state(spawn_pos: Vector2) -> void:
+	_is_dead = false
+	_has_won = false
+	_current_state = MoveState.FLOOR
+	_grapple_state = GrappleState.OFF
+	if _reticle: _reticle.visible = false
+	if _cable:   _cable.visible   = false
+	if _spike:   _spike.visible   = false
+	global_position = spawn_pos
+	velocity = Vector2.ZERO
+	rotation = 0.0
 const POSE_RUN      := 4
 const POSE_COMBAT   := 5
 const POSE_VICTORY  := 6

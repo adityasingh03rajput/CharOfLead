@@ -44,12 +44,13 @@ func _start_game() -> void:
 
 
 func _on_match_restarted() -> void:
-	if p1_3d: p1_3d.global_position = P1_3D_SPAWN; p1_3d.velocity = Vector3.ZERO; p1_3d._is_dead = false
-	if p2_3d: p2_3d.global_position = P2_3D_SPAWN; p2_3d.velocity = Vector3.ZERO; p2_3d._is_dead = false
-	if p1_2d: p1_2d.global_position = P1_2D_SPAWN; p1_2d.velocity = Vector2.ZERO; p1_2d._is_dead = false
-	if p2_2d: p2_2d.global_position = P2_2D_SPAWN; p2_2d.velocity = Vector2.ZERO; p2_2d._is_dead = false
-	if GameManager.is_3d_mode:
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if p1_3d and p1_3d.has_method("reset_state"): p1_3d.call("reset_state", P1_3D_SPAWN)
+	if p2_3d and p2_3d.has_method("reset_state"): p2_3d.call("reset_state", P2_3D_SPAWN)
+	if p1_2d and p1_2d.has_method("reset_state"): p1_2d.call("reset_state", P1_2D_SPAWN)
+	if p2_2d and p2_2d.has_method("reset_state"): p2_2d.call("reset_state", P2_2D_SPAWN)
+
+	_on_mode_changed(true)
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _on_peer_disconnected() -> void:

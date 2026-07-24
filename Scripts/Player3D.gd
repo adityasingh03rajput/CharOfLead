@@ -49,6 +49,17 @@ var _jump_buffer:   float = 0.0
 var _on_floor_last: bool  = false
 var _last_health:   float = 100.0
 
+
+func reset_state(spawn_pos: Vector3) -> void:
+	_is_dead = false
+	_has_won = false
+	_is_prone = false
+	_melee_t = 0.0
+	global_position = spawn_pos
+	velocity = Vector3.ZERO
+	if _weapon and _weapon.has_method("set_weapon"):
+		_weapon.call("set_weapon", 0)
+
 # ── Body-Hopping (P2) ─────────────────────────────────────────────────────────
 var is_idle_clone: bool = false
 var clone_number:  int  = 0

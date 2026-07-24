@@ -1156,7 +1156,7 @@ func _fire() -> void:
 	var query := PhysicsRayQueryParameters2D.create(global_position, global_position + dir_to_target * weapon_range)
 	query.exclude = [get_rid()]
 
-	_recoil_vel = -dir_to_target * 200.0 
+	_recoil_vel = -dir_to_target * 25.0
 	
 	var hit := space.intersect_ray(query)
 	var hit_pos := global_position + dir_to_target * weapon_range
@@ -1171,7 +1171,6 @@ func _fire() -> void:
 			_spawn_blood_2d(hit_pos, hit_normal)
 			
 	_draw_tracer_2d(global_position + dir_to_target * 16.0, hit_pos)
-
 
 func _spawn_blood_2d(pos: Vector2, normal: Vector2) -> void:
 	var particles := CPUParticles2D.new()

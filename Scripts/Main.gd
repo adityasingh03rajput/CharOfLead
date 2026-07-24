@@ -72,6 +72,7 @@ func _on_mode_changed(is_3d_mode: bool) -> void:
 			p2_2d.velocity = Vector2.ZERO
 
 	# Toggle environments
+
 	if env_3d:
 		env_3d.visible = is_3d_mode
 		env_3d.process_mode = Node.PROCESS_MODE_INHERIT if is_3d_mode else Node.PROCESS_MODE_DISABLED

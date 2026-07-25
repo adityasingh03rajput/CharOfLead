@@ -1,0 +1,12 @@
+{
+  "name": "diwall-relay-server",
+  "version": "1.0.0",
+  "description": "Cloud WebSocket Relay Server for DiWall Multiplayer",
+  "main": "relay_server.js",
+  "scripts": {
+    "start": "node relay_server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

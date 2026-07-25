@@ -261,37 +261,6 @@ func _is_path_clear_2d(from_2d: Vector2, to_2d: Vector2) -> bool:
 	var hit := space.intersect_ray(query)
 	return hit.is_empty()
 
-func _find_best_2d_shelf_route(self_pos: Vector2, target_pos: Vector2) -> float:
-	if not is_instance_valid(_body_2d):
-		return signf(target_pos.x - self_pos.x)
-
-	var space := _body_2d.get_world_2d().direct_space_state
-	# Probe left side (step -32px to -320px)
-	var left_open := false
-	for offset in range(32, 350, 32):
-		var test_pos := self_pos + Vector2(-offset, 0)
-		var query := PhysicsRayQueryParameters2D.create(test_pos, test_pos + Vector2(0, 150))
-		query.exclude = [_body_2d.get_rid()]
-		var hit := space.intersect_ray(query)
-		if hit.is_empty():
-			left_open = true
-			break
-
-	# Probe right side (step +32px to +320px)
-	var right_open := false
-	for offset in range(32, 350, 32):
-		var test_pos := self_pos + Vector2(offset, 0)
-		var query := PhysicsRayQueryParameters2D.create(test_pos, test_pos + Vector2(0, 150))
-		query.exclude = [_body_2d.get_rid()]
-		var hit := space.intersect_ray(query)
-		if hit.is_empty():
-			right_open = true
-			break
-
-	if target_pos.x < self_pos.x:
-		return -1.0 if left_open or not right_open else 1.0
-	else:
-		return 1.0 if right_open or not left_open else -1.0
 
 func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	if _is_path_clear_2d(self_pos, target_pos):

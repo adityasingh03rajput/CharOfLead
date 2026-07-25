@@ -29,6 +29,7 @@ var _help_visible: bool = false
 
 
 var _rematch_modal: PanelContainer
+var _rematch_title_lbl: Label
 
 func _ready() -> void:
 	GameManager.health_changed.connect(_on_health_changed)

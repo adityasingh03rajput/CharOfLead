@@ -128,6 +128,17 @@ func explode() -> void:
 	if _exploded:
 		return
 	_exploded = true
+	if NetworkManager and NetworkManager.is_online:
+		rpc("_rpc_net_explode")
+	_do_explode()
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_net_explode() -> void:
+	if not _exploded:
+		_exploded = true
+		_do_explode()
+
+func _do_explode() -> void:
 	remove_from_group("sticky_bombs_3d")
 
 	var gm = get_node_or_null("/root/GameManager")

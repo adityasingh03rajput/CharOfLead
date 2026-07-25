@@ -92,7 +92,31 @@ func throw_bomb() -> void:
 		-_player.global_transform.basis.z
 	cam_fwd = cam_fwd.normalized()
 	var spawn_pos := _player.global_position + Vector3.UP * 1.4 + cam_fwd * 0.6
+	var vel := cam_fwd * 18.0 + Vector3(0, 7.5, 0)
+	var ang := Vector3(
+		randf_range(-14.0, 14.0),
+		randf_range(-8.0,  8.0),
+		randf_range(-14.0, 14.0))
 
+	_spawn_bomb_instance(spawn_pos, vel, ang, _player_id)
+
+	if NetworkManager and NetworkManager.is_online:
+		rpc("_rpc_net_throw_bomb", spawn_pos, vel, ang, _player_id)
+
+	if _gun_bomb:
+		_gun_bomb.position  = GUN_REST + Vector3(0, 0.25, -0.35)
+		_gun_bomb.rotation.x = -0.7
+		var tw := _player.create_tween()
+		tw.tween_property(_gun_bomb, "position",   GUN_REST, 0.35).set_ease(Tween.EASE_OUT)
+		tw.tween_property(_gun_bomb, "rotation:x", 0.0,      0.35).set_ease(Tween.EASE_OUT)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_net_throw_bomb(spawn_pos: Vector3, vel: Vector3, ang: Vector3, pid: int) -> void:
+	_spawn_bomb_instance(spawn_pos, vel, ang, pid)
+
+
+func _spawn_bomb_instance(spawn_pos: Vector3, vel: Vector3, ang: Vector3, pid: int) -> void:
 	var bomb := RigidBody3D.new()
 	bomb.contact_monitor = true
 	bomb.max_contacts_reported = 4
@@ -134,12 +158,9 @@ func throw_bomb() -> void:
 
 	_attach_bomb_script(bomb)
 	_player.get_tree().root.add_child(bomb)
-	bomb.global_position = spawn_pos
-	bomb.linear_velocity  = cam_fwd * 18.0 + Vector3(0, 7.5, 0)
-	bomb.angular_velocity = Vector3(
-		randf_range(-14.0, 14.0),
-		randf_range(-8.0,  8.0),
-		randf_range(-14.0, 14.0))
+	bomb.global_position  = spawn_pos
+	bomb.linear_velocity  = vel
+	bomb.angular_velocity = ang
 
 	if _gun_bomb:
 		_gun_bomb.position  = GUN_REST + Vector3(0, 0.25, -0.35)

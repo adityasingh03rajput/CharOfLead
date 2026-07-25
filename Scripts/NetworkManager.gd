@@ -81,11 +81,13 @@ func start_join(code_or_ip: String, port: int = DEFAULT_PORT) -> String:
 		url = raw
 	elif raw.contains("onrender.com") or raw.contains("playit.gg") or raw.contains("ngrok.io"):
 		url = "wss://%s" % raw.trim_prefix("https://").trim_prefix("http://")
+	elif raw.to_lower() in ["local", "localhost", "127.0.0.1", "0", "me"]:
+		url = "ws://127.0.0.1:%d" % port
+	elif raw.contains("."):
+		url = "ws://%s:%d" % [raw, port]
 	else:
-		var target_ip := code_to_ip(raw)
-		if target_ip == get_local_ip() or target_ip.begins_with("169.254.") or raw.to_lower() in ["local", "localhost", "127.0.0.1", "0", "me"]:
-			target_ip = "127.0.0.1"
-		url = "ws://%s:%d" % [target_ip, port]
+		# 6-Digit Room Code: Route over Cloud Server wss://sam3.onrender.com
+		url = "%s?room=%s" % [DEFAULT_CLOUD_SERVER, raw]
 
 	var peer := WebSocketMultiplayerPeer.new()
 	var err := peer.create_client(url)

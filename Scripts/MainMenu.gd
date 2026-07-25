@@ -40,6 +40,7 @@ var _join_container:   Control   # toggled for Join mode
 
 var _code_edit:        LineEdit
 var _status_lbl:       Label
+var _host_code_lbl:    Label
 var _anim_time:        float = 0.0
 
 
@@ -205,12 +206,12 @@ func _build_ui() -> void:
 	_host_container.add_child(code_box)
 
 	var room_code := NetworkManager.get_room_code() if NetworkManager else "1050"
-	var code_lbl := Label.new()
-	code_lbl.text = "YOUR ROOM CODE:  %s" % room_code
-	code_lbl.add_theme_font_size_override("font_size", 22)
-	code_lbl.add_theme_color_override("font_color", COLORS["highlight"])
-	code_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	code_box.add_child(code_lbl)
+	_host_code_lbl = Label.new()
+	_host_code_lbl.text = "YOUR ROOM CODE:  %s" % room_code
+	_host_code_lbl.add_theme_font_size_override("font_size", 22)
+	_host_code_lbl.add_theme_color_override("font_color", COLORS["highlight"])
+	_host_code_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	code_box.add_child(_host_code_lbl)
 
 	var ip_info := Label.new()
 	var local_ip := NetworkManager.get_local_ip() if NetworkManager else "127.0.0.1"
@@ -461,6 +462,8 @@ func _on_start_pressed() -> void:
 					if _status_lbl: _status_lbl.text = "Error: " + err
 					return
 				var room_code := NetworkManager.get_room_code()
+				if _host_code_lbl:
+					_host_code_lbl.text = "YOUR ROOM CODE:  %s" % room_code
 				if _status_lbl:
 					_status_lbl.text = "Lobby Open! Share Room Code: %s\nWaiting for friend to enter code..." % room_code
 				_start_btn.disabled = true

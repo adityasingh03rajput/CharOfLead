@@ -218,6 +218,38 @@ func _init_nav() -> void:
 				var weight: float = nodes[i].distance_to(nodes[j])
 				_astar.connect_points(i, j, true)
 
+func _is_path_clear(from: Vector2, to: Vector2) -> bool:
+	for w in MAZE_WALLS:
+		if Geometry2D.segment_intersects_segment(from, to, w[0], w[1]) != null:
+			return false
+	return true
+
+func _get_nav_dir(self_pos: Vector2, target_pos: Vector2) -> Vector2:
+	if _is_path_clear(self_pos, target_pos):
+		return (target_pos - self_pos).normalized()
+		
+	var id_s := 1000
+	var id_t := 1001
+	_astar.add_point(id_s, self_pos)
+	_astar.add_point(id_t, target_pos)
+	
+	for i in _astar.get_point_ids():
+		if i == id_s or i == id_t: continue
+		var p_pos := _astar.get_point_position(i)
+		if _is_path_clear(self_pos, p_pos):
+			_astar.connect_points(id_s, i)
+		if _is_path_clear(target_pos, p_pos):
+			_astar.connect_points(id_t, i)
+			
+	var path := _astar.get_point_path(id_s, id_t)
+	var dir := (target_pos - self_pos).normalized()
+	if path.size() > 1:
+		dir = (path[1] - self_pos).normalized()
+		
+	_astar.remove_point(id_s)
+	_astar.remove_point(id_t)
+	return dir
+
 func _is_path_clear_2d(from_2d: Vector2, to_2d: Vector2) -> bool:
 	if not is_instance_valid(_body_2d):
 		return true

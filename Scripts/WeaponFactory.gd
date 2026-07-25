@@ -238,8 +238,16 @@ func _fire() -> void:
 
 	var screen_center := _player.get_viewport().get_visible_rect().size / 2.0
 	var cam_from  := cam.project_ray_origin(screen_center) if cam else _player.global_position
-	var cam_fwd   := cam.project_ray_normal(screen_center) if cam else -_player.global_transform.basis.z
-	var target_pos := cam_from + cam_fwd * weapon_range
+	var cam_dir   := -_player.global_transform.basis.z
+	var ai_ctrl: Node = _player.get("ai_controller") if _player else null
+	if ai_ctrl and is_instance_valid(ai_ctrl):
+		var ai_inp: Dictionary = ai_ctrl.call("get_virtual_input_3d")
+		var aim_d: Vector3 = ai_inp.get("aim_dir", Vector3.ZERO)
+		if aim_d != Vector3.ZERO:
+			cam_dir = aim_d
+	elif cam:
+		cam_dir = cam.project_ray_normal(screen_center)
+	var target_pos := cam_from + cam_dir * weapon_range
 
 	if cam:
 		var cq := PhysicsRayQueryParameters3D.create(cam_from, target_pos)

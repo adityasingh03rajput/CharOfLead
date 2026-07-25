@@ -206,14 +206,14 @@ func _tick_3d(delta: float) -> void:
 	var to_enemy: Vector3  = enemy_pos - self_pos
 	var dist: float        = to_enemy.length()
 
+	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else (ai_player_id == 1)
+
 	# ── State selection ───────────────────────────────────────────────────────
 	if _decision_timer <= 0.0:
 		_decision_timer = DECISION_RATE[ai_difficulty]
-		if ai_player_id == 1:
-			# Red is hunter in 3D
+		if is_ai_armed:
 			_state = AIState.STRAFE if dist < 14.0 and _has_line_of_sight_3d() else AIState.SEEK
 		else:
-			# Blue is unarmed in 3D: evade, and body-hop when exposed or hurt.
 			_state = AIState.BODY_HOP if _should_body_hop_3d(dist) else AIState.EVADE
 
 	# ── Strafe direction cycling ──────────────────────────────────────────────
@@ -238,7 +238,8 @@ func _ai_3d_seek(to_enemy: Vector3, dist: float) -> void:
 	_virt_move    = nav_dir
 	_ai_cam_yaw   = atan2(nav_dir.x, nav_dir.y)
 
-	if ai_player_id == 1 and dist < 22.0 and GameManager.is_armed(1):
+	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else true
+	if is_ai_armed and dist < 22.0:
 		if _react_timer <= 0.0 and _has_line_of_sight_3d():
 			_aim_and_fire_3d()
 
@@ -263,7 +264,8 @@ func _ai_3d_strafe(delta: float, to_enemy: Vector3, enemy_pos: Vector3) -> void:
 		aim_flat    = aim_flat.normalized()
 		_ai_cam_yaw = atan2(aim_flat.x, aim_flat.z)
 
-	if ai_player_id == 1 and GameManager.is_armed(1) and _react_timer <= 0.0 and _has_line_of_sight_3d():
+	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else true
+	if is_ai_armed and _react_timer <= 0.0 and _has_line_of_sight_3d():
 		_aim_and_fire_3d()
 
 	if randf() < 0.002:
@@ -420,15 +422,15 @@ func _tick_2d(_delta: float) -> void:
 	var to_enemy: Vector2  = enemy_pos - self_pos
 	var dist: float        = to_enemy.length()
 
+	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else (ai_player_id == 2)
+
 	# ── State selection ───────────────────────────────────────────────────────
 	if _decision_timer <= 0.0:
 		_decision_timer = DECISION_RATE[ai_difficulty]
-		if ai_player_id == 2:
-			# Blue assassin: close distance when blocked/far, kite at pistol range.
+		if is_ai_armed:
 			_state = AIState.STRAFE if dist < 560.0 and _has_line_of_sight_2d() else AIState.SEEK
 		else:
-			# Red unarmed in 2D — evade
-			if (dist < 420.0 or _health_ratio(1) < 0.5) and _grapple_timer <= 0.0:
+			if (dist < 420.0 or _health_ratio(ai_player_id) < 0.5) and _grapple_timer <= 0.0 and ai_player_id == 1:
 				_state = AIState.GRAPPLE
 			else:
 				_state = AIState.EVADE
@@ -452,7 +454,8 @@ func _tick_2d(_delta: float) -> void:
 func _ai_2d_seek(to_enemy: Vector2, enemy_pos: Vector2) -> void:
 	_virt_move = _smart_2d_move_toward(to_enemy)
 	_virt_mouse_world = _predict_enemy_2d(enemy_pos)
-	if ai_player_id == 2 and GameManager.is_armed(2) and _react_timer <= 0.0 and _has_line_of_sight_2d():
+	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else true
+	if is_ai_armed and _react_timer <= 0.0 and _has_line_of_sight_2d():
 		_virt_fire   = true
 		_react_timer = REACT_DELAY[ai_difficulty]
 
@@ -477,7 +480,8 @@ func _ai_2d_strafe(to_enemy: Vector2, dist: float, enemy_pos: Vector2) -> void:
 	if randf() < (0.004 if ai_difficulty == 2 else 0.002):
 		_virt_jump = true
 
-	if ai_player_id == 2 and GameManager.is_armed(2) and _react_timer <= 0.0 and _has_line_of_sight_2d():
+	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else true
+	if is_ai_armed and _react_timer <= 0.0 and _has_line_of_sight_2d():
 		_virt_fire   = true
 		_react_timer = REACT_DELAY[ai_difficulty]
 

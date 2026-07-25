@@ -17,15 +17,31 @@ var local_pid:      int  = 1    ## 1=Red Soldier, 2=Blue Assassin
 var remote_peer_id: int  = 0
 
 
+var current_room_code: String = ""
+
+
+func generate_random_room_code() -> String:
+	current_room_code = "%06d" % randi_range(100000, 999999)
+	return current_room_code
+
+
 ## Start as host. chosen_role: 0=random, 1=Red, 2=Blue.
 ## Returns an error string on failure, "" on success.
 func start_host(chosen_role: int = 0, port: int = DEFAULT_PORT) -> String:
 	stop()
+	generate_random_room_code()
 	local_pid = randi_range(1, 2) if chosen_role == 0 else chosen_role
 	var peer := WebSocketMultiplayerPeer.new()
 	var err  := peer.create_server(port)
 	if err != OK:
-		return "Cannot open port %d — already in use by another process?" % port
+		# Fallback to alternate ports if 7777 is occupied by a background process
+		for alt_port in range(7778, 7788):
+			err = peer.create_server(alt_port)
+			if err == OK:
+				break
+		if err != OK:
+			return "Port occupied by another process. Please close previous instances."
+
 	multiplayer.multiplayer_peer = peer
 	if not multiplayer.peer_connected.is_connected(_on_peer_connected):
 		multiplayer.peer_connected.connect(_on_peer_connected)
@@ -116,9 +132,11 @@ func get_local_ip() -> String:
 	return "127.0.0.1"
 
 
-## Returns the easy Room Code for the current host's IP.
+## Returns the Room Code for the current host.
 func get_room_code() -> String:
-	return ip_to_code(get_local_ip())
+	if current_room_code != "":
+		return current_room_code
+	return generate_random_room_code()
 
 
 # ── Room Code Encoding / Decoding ──────────────────────────────────────────────

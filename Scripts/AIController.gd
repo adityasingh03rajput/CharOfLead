@@ -548,10 +548,31 @@ func _tick_2d(_delta: float) -> void:
 
 
 func _ai_2d_seek(to_enemy: Vector2, enemy_pos: Vector2) -> void:
+	var has_los := _has_line_of_sight_2d()
 	_virt_move = _smart_2d_move_toward(to_enemy)
 	_virt_mouse_world = _predict_enemy_2d(enemy_pos)
+
+	# ── Intelligent Wall & Ledge Navigation ────────────────────────────────
+	if not has_los and is_instance_valid(_body_2d):
+		var is_on_wall: bool = _body_2d.is_on_wall()
+		var st: int = int(_body_2d.get("_current_state")) # 1=WALL_LEFT, 2=WALL_RIGHT
+
+		if is_on_wall or st == 1 or st == 2:
+			# Stuck on wall or mounted -> climb up/down toward enemy's Y elevation
+			var climb_dir := signf(to_enemy.y)
+			if climb_dir == 0.0: climb_dir = -1.0
+			_virt_move.y = climb_dir
+			if randf() < 0.4:
+				_virt_jump = true # Jump off/up wall to negotiate corners
+		elif absf(to_enemy.y) > 40.0:
+			# Enemy is on another shelf level -> jump to climb or drop
+			if to_enemy.y < -40.0 and _body_2d.is_on_floor():
+				_virt_jump = true # Leap up to upper shelf/ledge!
+			elif to_enemy.y > 40.0 and _body_2d.is_on_floor():
+				_virt_move.x = signf(to_enemy.x) if absf(to_enemy.x) > 20.0 else _strafe_dir
+
 	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else true
-	if is_ai_armed and _react_timer <= 0.0 and _has_line_of_sight_2d():
+	if is_ai_armed and _react_timer <= 0.0 and has_los:
 		_virt_fire   = true
 		_react_timer = REACT_DELAY[ai_difficulty]
 
@@ -622,6 +643,12 @@ func _smart_2d_move_toward(to_enemy: Vector2) -> Vector2:
 	var move := Vector2.ZERO
 	move.x = sign(to_enemy.x) if abs(to_enemy.x) > 35.0 else 0.0
 	move.y = sign(to_enemy.y) if abs(to_enemy.y) > 90.0 else 0.0
+
+	if is_instance_valid(_body_2d) and _body_2d.is_on_wall():
+		# Bumping wall horizontally -> jump to leap over shelf or mount wall!
+		move.y = signf(to_enemy.y) if absf(to_enemy.y) > 20.0 else -1.0
+		_virt_jump = true
+
 	if move == Vector2.ZERO:
 		move.x = _strafe_dir
 	return _apply_surface_frame_2d(move.normalized(), to_enemy)

@@ -592,11 +592,13 @@ func _ai_2d_seek(to_enemy: Vector2, enemy_pos: Vector2) -> void:
 			_virt_move.x = -signf(to_enemy.x) # step BACK from wall face to allow leap!
 			_virt_jump = true
 		elif absf(to_enemy.y) > 40.0:
-			# Enemy is on another shelf level -> jump to climb or drop
+			# Enemy is on another shelf level -> probe left vs right routes to find drop edge / wall climb!
 			if to_enemy.y < -40.0 and _body_2d.is_on_floor():
 				_virt_jump = true # Leap up to upper shelf/ledge!
+				_virt_move.x = _find_best_2d_shelf_route(_body_2d.global_position, enemy_pos)
 			elif to_enemy.y > 40.0 and _body_2d.is_on_floor():
-				_virt_move.x = signf(to_enemy.x) if absf(to_enemy.x) > 20.0 else _strafe_dir
+				# Enemy is below -> probe left vs right shelf edge to drop down!
+				_virt_move.x = _find_best_2d_shelf_route(_body_2d.global_position, enemy_pos)
 
 	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else true
 	if is_ai_armed and _react_timer <= 0.0 and has_los:
@@ -718,3 +720,42 @@ func _predict_enemy_2d(enemy_pos: Vector2) -> Vector2:
 	return enemy_pos + Vector2(
 		randf_range(-spread * 3.0, spread * 3.0),
 		randf_range(-spread * 2.0, spread * 2.0))
+
+
+func _find_best_2d_shelf_route(self_pos: Vector2, enemy_pos: Vector2) -> float:
+	if not is_instance_valid(_body_2d):
+		return -1.0 if enemy_pos.x < self_pos.x else 1.0
+
+	var space := _body_2d.get_world_2d().direct_space_state
+	var left_drop_x: float = -9999.0
+	var right_drop_x: float = 9999.0
+
+	# Scan left for drop edge (downward raycast missing floor)
+	for step in range(20, 500, 25):
+		var test_pos := self_pos + Vector2(-step, 5.0)
+		var ray_end  := self_pos + Vector2(-step, 50.0)
+		var q := PhysicsRayQueryParameters2D.create(test_pos, ray_end)
+		q.exclude = [_body_2d.get_rid()]
+		if space.intersect_ray(q).is_empty():
+			left_drop_x = self_pos.x - step
+			break
+
+	# Scan right for drop edge
+	for step in range(20, 500, 25):
+		var test_pos := self_pos + Vector2(step, 5.0)
+		var ray_end  := self_pos + Vector2(step, 50.0)
+		var q := PhysicsRayQueryParameters2D.create(test_pos, ray_end)
+		q.exclude = [_body_2d.get_rid()]
+		if space.intersect_ray(q).is_empty():
+			right_drop_x = self_pos.x + step
+			break
+
+	var dist_left  := absf(self_pos.x - left_drop_x)  + absf(left_drop_x - enemy_pos.x)  if left_drop_x > -9000.0 else 99999.0
+	var dist_right := absf(self_pos.x - right_drop_x) + absf(right_drop_x - enemy_pos.x) if right_drop_x < 9000.0  else 99999.0
+
+	if dist_left < dist_right:
+		return -1.0 # Route Left!
+	elif dist_right < dist_left:
+		return 1.0  # Route Right!
+	else:
+		return -1.0 if enemy_pos.x < self_pos.x else 1.0

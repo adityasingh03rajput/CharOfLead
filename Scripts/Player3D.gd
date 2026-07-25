@@ -319,7 +319,7 @@ func _physics_process(delta: float) -> void:
 	var ai_fire := false
 	var is_ai := false
 	var ai_yaw := 0.0
-	if ai_controller and is_instance_valid(ai_controller):
+	if ai_controller and is_instance_valid(ai_controller) and ai_controller.has_method("get_virtual_input_3d"):
 		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_3d")
 		is_ai = true
 		input_dir = ai_inp.get("move", Vector2.ZERO)

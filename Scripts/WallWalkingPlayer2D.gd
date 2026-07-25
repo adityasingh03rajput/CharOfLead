@@ -348,7 +348,7 @@ func _handle_grapple(delta: float, input_x: float, input_y: float) -> bool:
 	if not InputMap.has_action(grapple_action):
 		grapple_action = _act_fire
 	var fire_down    := Input.is_action_pressed(grapple_action)
-	if ai_controller and is_instance_valid(ai_controller):
+	if ai_controller and is_instance_valid(ai_controller) and ai_controller.has_method("get_virtual_input_2d"):
 		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
 		fire_down = fire_down or bool(ai_inp.get("grapple", false))
 	var fire_pressed := fire_down and not _fire_was_down
@@ -651,7 +651,7 @@ func _physics_process(delta: float) -> void:
 	var is_running := Input.is_key_pressed(KEY_SHIFT) if _input_pid == 1 else Input.is_key_pressed(KEY_CTRL)
 	var is_crouching := Input.is_action_pressed(_act_down)
 
-	if ai_controller and is_instance_valid(ai_controller):
+	if ai_controller and is_instance_valid(ai_controller) and ai_controller.has_method("get_virtual_input_2d"):
 		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
 		var mv: Vector2 = ai_inp.get("move", Vector2.ZERO)
 		input_x = mv.x
@@ -767,7 +767,7 @@ func _physics_process(delta: float) -> void:
 		if GameManager and GameManager.is_armed(player_id) and not _is_dead:
 			_gun.visible = true
 			var mouse_pos: Vector2 = get_global_mouse_position()
-			if ai_controller and is_instance_valid(ai_controller):
+			if ai_controller and is_instance_valid(ai_controller) and ai_controller.has_method("get_virtual_input_2d"):
 				var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
 				mouse_pos = ai_inp.get("mouse_world", mouse_pos)
 			_gun.position = _current_points["hand_r"]
@@ -782,7 +782,7 @@ func _physics_process(delta: float) -> void:
 
 	if GameManager and GameManager.is_armed(player_id) and not _is_dead:
 		var fire_pressed := Input.is_action_just_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-		if ai_controller and is_instance_valid(ai_controller):
+		if ai_controller and is_instance_valid(ai_controller) and ai_controller.has_method("get_virtual_input_2d"):
 			var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
 			fire_pressed = fire_pressed or ai_inp.get("fire", false)
 		if _cd <= 0.0 and fire_pressed:
@@ -822,7 +822,7 @@ func _update_facing(move_dir: float) -> void:
 		_facing_right = true
 	elif GameManager and GameManager.is_armed(player_id) and (not (NetworkManager and NetworkManager.is_online) or is_multiplayer_authority()):
 		var mouse_pos: Vector2 = get_global_mouse_position()
-		if ai_controller and is_instance_valid(ai_controller):
+		if ai_controller and is_instance_valid(ai_controller) and ai_controller.has_method("get_virtual_input_2d"):
 			var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
 			mouse_pos = ai_inp.get("mouse_world", mouse_pos)
 		_facing_right = mouse_pos.x > global_position.x
@@ -1083,7 +1083,7 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 		var aim_vec := Vector2.RIGHT
 		if is_local:
 			var mouse_pos: Vector2 = get_global_mouse_position()
-			if ai_controller and is_instance_valid(ai_controller):
+			if ai_controller and is_instance_valid(ai_controller) and ai_controller.has_method("get_virtual_input_2d"):
 				var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
 				mouse_pos = ai_inp.get("mouse_world", mouse_pos)
 			# Localize mouse position to the skeleton to respect wall rotations
@@ -1219,7 +1219,7 @@ func _fire() -> void:
 	var target_id: int = 1 if player_id == 2 else 2
 	var space := get_world_2d().direct_space_state
 	var mouse_pos: Vector2 = get_global_mouse_position()
-	if ai_controller and is_instance_valid(ai_controller):
+	if ai_controller and is_instance_valid(ai_controller) and ai_controller.has_method("get_virtual_input_2d"):
 		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
 		mouse_pos = ai_inp.get("mouse_world", mouse_pos)
 

@@ -90,7 +90,7 @@ func throw_bomb() -> void:
 	var cam := _player.get_viewport().get_camera_3d()
 	var ai_ctrl_b: Node = _player.get("ai_controller") if _player else null
 	var cam_fwd: Vector3
-	if ai_ctrl_b and is_instance_valid(ai_ctrl_b):
+	if ai_ctrl_b and is_instance_valid(ai_ctrl_b) and ai_ctrl_b.has_method("get_virtual_input_3d"):
 		var ai_inp: Dictionary = ai_ctrl_b.call("get_virtual_input_3d")
 		cam_fwd = ai_inp.get("aim_dir", -_player.global_transform.basis.z)
 		if cam_fwd == Vector3.ZERO:
@@ -251,7 +251,7 @@ func _fire() -> void:
 	var cam_from  := cam.project_ray_origin(screen_center) if cam else _player.global_position
 	var cam_dir   := -_player.global_transform.basis.z
 	var ai_ctrl: Node = _player.get("ai_controller") if _player else null
-	if ai_ctrl and is_instance_valid(ai_ctrl):
+	if ai_ctrl and is_instance_valid(ai_ctrl) and ai_ctrl.has_method("get_virtual_input_3d"):
 		# An AI shot must leave the AI's own muzzle, not the local player's eye.
 		cam_from = muzzle_pos
 		var ai_inp: Dictionary = ai_ctrl.call("get_virtual_input_3d")

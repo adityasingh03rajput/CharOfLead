@@ -201,19 +201,22 @@ func _process(delta: float) -> void:
 
 
 func _init_nav() -> void:
-	# Build waypoint graph (scaled to 3D coords, 2D will multiply/divide by 32)
+	_astar.clear()
+	# Topological graph nodes representing key intersections, shelf edges, and corridor corners
 	var nodes := [
-		Vector2(-10, -10), Vector2(-10, 0), Vector2(-10, 10),
-		Vector2(0, -8), Vector2(0, 8),
-		Vector2(10, -10), Vector2(10, 0), Vector2(10, 10),
-		Vector2(-4, -8), Vector2(4, 8)
+		Vector2(-12.0, -8.0), Vector2(-6.0, -8.0), Vector2(0.5, -8.0),   # Top shelf row
+		Vector2(-12.0, -4.5), Vector2(-6.0, -4.5), Vector2(1.0, -4.5),   # Mid-upper row (shelf corners)
+		Vector2(-1.0, 0.0),   Vector2(1.0, 0.0),                         # Central wall bend
+		Vector2(-1.0, 4.5),   Vector2(6.0, 4.5),   Vector2(12.0, 4.5),   # Mid-lower row (lower shelf corners)
+		Vector2(-12.0, 8.0),  Vector2(0.0, 8.0),    Vector2(12.0, 8.0)   # Floor row
 	]
 	for i in nodes.size():
 		_astar.add_point(i, nodes[i])
 	for i in nodes.size():
 		for j in range(i + 1, nodes.size()):
 			if _is_path_clear(nodes[i], nodes[j]):
-				_astar.connect_points(i, j)
+				var weight: float = nodes[i].distance_to(nodes[j])
+				_astar.connect_points(i, j, true)
 
 func _is_path_clear(from: Vector2, to: Vector2) -> bool:
 	for w in MAZE_WALLS:
@@ -225,26 +228,35 @@ func _get_nav_dir(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	if _is_path_clear(self_pos, target_pos):
 		return (target_pos - self_pos).normalized()
 		
-	var id_s = 100
-	var id_t = 101
+	var id_s := 1000
+	var id_t := 1001
 	_astar.add_point(id_s, self_pos)
 	_astar.add_point(id_t, target_pos)
 	
 	for i in _astar.get_point_ids():
 		if i == id_s or i == id_t: continue
-		if _is_path_clear(self_pos, _astar.get_point_position(i)):
+		var p_pos := _astar.get_point_position(i)
+		if _is_path_clear(self_pos, p_pos):
 			_astar.connect_points(id_s, i)
-		if _is_path_clear(target_pos, _astar.get_point_position(i)):
+		if _is_path_clear(target_pos, p_pos):
 			_astar.connect_points(id_t, i)
 			
-	var path = _astar.get_point_path(id_s, id_t)
-	var dir = (target_pos - self_pos).normalized()
+	var path := _astar.get_point_path(id_s, id_t)
+	var dir := (target_pos - self_pos).normalized()
 	if path.size() > 1:
 		dir = (path[1] - self_pos).normalized()
 		
 	_astar.remove_point(id_s)
 	_astar.remove_point(id_t)
 	return dir
+
+func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
+	# Scale 2D pixel coordinates (arena width ~700px) to graph space (~24 units)
+	var scale_factor := 32.0
+	var s_grid := self_pos / scale_factor
+	var t_grid := target_pos / scale_factor
+	var grid_dir := _get_nav_dir(s_grid, t_grid)
+	return grid_dir
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 3-D BRAIN  (State A — Red is hunter)
@@ -669,6 +681,11 @@ func _ai_2d_grapple_escape(to_enemy: Vector2) -> void:
 
 
 func _smart_2d_move_toward(to_enemy: Vector2) -> Vector2:
+	if is_instance_valid(_body_2d) and is_instance_valid(_enemy_2d) and not _has_line_of_sight_2d():
+		var astar_dir := _get_nav_dir_2d(_body_2d.global_position, _enemy_2d.global_position)
+		if astar_dir.length_squared() > 0.01:
+			return _apply_surface_frame_2d(astar_dir, to_enemy)
+
 	var move := Vector2.ZERO
 	move.x = sign(to_enemy.x) if abs(to_enemy.x) > 35.0 else 0.0
 	move.y = sign(to_enemy.y) if abs(to_enemy.y) > 90.0 else 0.0

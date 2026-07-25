@@ -358,6 +358,17 @@ func _physics_process(delta: float) -> void:
 		velocity.x = move_toward(velocity.x, 0.0, decel * delta * top_speed)
 		velocity.z = move_toward(velocity.z, 0.0, decel * delta * top_speed)
 
+	# ── Anti-Head-Standing Physical Separation ─────────────────────────────
+	var other_pid := 2 if player_id == 1 else 1
+	var other_nodes := get_tree().get_nodes_in_group("p%d_body_3d" % other_pid)
+	for other in other_nodes:
+		if is_instance_valid(other) and other != self:
+			var d_xz := Vector2(global_position.x - (other as Node3D).global_position.x, global_position.z - (other as Node3D).global_position.z)
+			if d_xz.length() < 0.85:
+				var push_dir := d_xz.normalized() if d_xz.length() > 0.05 else Vector2(randf() - 0.5, randf() - 0.5).normalized()
+				velocity.x += push_dir.x * 6.0
+				velocity.z += push_dir.y * 6.0
+
 	# ── Firing ────────────────────────────────────────────────────────────────
 	if is_hunter and GameManager and GameManager.is_armed(player_id) \
 			and not _has_won and _melee_t <= 0.0 and not _is_prone:

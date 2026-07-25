@@ -233,6 +233,19 @@ func _tick_3d(delta: float) -> void:
 func _ai_3d_seek(to_enemy: Vector3, dist: float) -> void:
 	var self_pos = _body_3d.global_position
 	var target_pos = _enemy_3d.global_position
+
+	# Maintain a 3.2m combat standoff distance — stops AI from walking into player's capsule
+	if dist < 3.2:
+		var away := -to_enemy
+		away.y = 0.0
+		if away.length_squared() > 0.01:
+			away = away.normalized()
+		else:
+			away = Vector3.FORWARD
+		_virt_move = Vector2(away.x, away.z)
+		_ai_cam_yaw = atan2(to_enemy.x, to_enemy.z)
+		return
+
 	var nav_dir = _get_nav_dir(Vector2(self_pos.x, self_pos.z), Vector2(target_pos.x, target_pos.z))
 	
 	_virt_move    = nav_dir

@@ -150,6 +150,7 @@ func _show_rematch_modal(winner_id: int) -> void:
 		_rematch_modal.add_theme_stylebox_override("panel", style)
 
 		var margin := MarginContainer.new()
+		margin.name = "MarginContainer"
 		margin.add_theme_constant_override("margin_left", 24)
 		margin.add_theme_constant_override("margin_top", 20)
 		margin.add_theme_constant_override("margin_right", 24)
@@ -162,11 +163,11 @@ func _show_rematch_modal(winner_id: int) -> void:
 		vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 		margin.add_child(vbox)
 
-		var title := Label.new()
-		title.name = "Title"
-		title.add_theme_font_size_override("font_size", 24)
-		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		vbox.add_child(title)
+		_rematch_title_lbl = Label.new()
+		_rematch_title_lbl.name = "Title"
+		_rematch_title_lbl.add_theme_font_size_override("font_size", 24)
+		_rematch_title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		vbox.add_child(_rematch_title_lbl)
 
 		var sub := Label.new()
 		sub.text = "MATCH FINISHED"
@@ -205,14 +206,13 @@ func _show_rematch_modal(winner_id: int) -> void:
 
 		add_child(_rematch_modal)
 
-	var title_lbl := _rematch_modal.get_node("MarginContainer/VBox/Title") as Label
-	if title_lbl:
+	if _rematch_title_lbl:
 		if winner_id == 1:
-			title_lbl.text = "🔴 RED SOLDIER WINS!"
-			title_lbl.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2))
+			_rematch_title_lbl.text = "🔴 RED SOLDIER WINS!"
+			_rematch_title_lbl.add_theme_color_override("font_color", Color(1.0, 0.25, 0.2))
 		else:
-			title_lbl.text = "🔵 BLUE ASSASSIN WINS!"
-			title_lbl.add_theme_color_override("font_color", Color(0.25, 0.6, 1.0))
+			_rematch_title_lbl.text = "🔵 BLUE ASSASSIN WINS!"
+			_rematch_title_lbl.add_theme_color_override("font_color", Color(0.25, 0.6, 1.0))
 
 	_rematch_modal.visible = true
 

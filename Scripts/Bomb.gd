@@ -49,10 +49,11 @@ func _sync_dimension(is_3d_mode: bool) -> void:
 		_ring_line = null
 		_prompt_label = null
 	else:
-		if is_stuck and not _exploded:
-			_create_marker_2d()
+		_create_marker_2d()
 
 func _create_marker_2d() -> void:
+	if _marker_2d and is_instance_valid(_marker_2d):
+		return
 	var main := get_tree().root.get_node_or_null("Main")
 	if not main:
 		return
@@ -68,14 +69,16 @@ func _create_marker_2d() -> void:
 	_marker_2d.position = Vector2(bx, by)
 	env2d.add_child(_marker_2d)
 
+	_ring_line = _build_ring(18.0, Color(1.0, 0.2, 0.1, 0.95))
+	_marker_2d.add_child(_ring_line)
 	_marker_2d.add_child(_build_bomb_icon())
 
 	_prompt_label = Label.new()
-	_prompt_label.text = "G  ·  DETONATE"
-	_prompt_label.add_theme_font_size_override("font_size", 11)
-	_prompt_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.3))
-	_prompt_label.position = Vector2(-38, 18)
-	_prompt_label.visible = false
+	_prompt_label.text = "💣 [G] DETONATE BOMB"
+	_prompt_label.add_theme_font_size_override("font_size", 12)
+	_prompt_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.2))
+	_prompt_label.position = Vector2(-60, 20)
+	_prompt_label.visible = true
 	_marker_2d.add_child(_prompt_label)
 
 	set_meta("bomb_2d", _marker_2d)
@@ -90,8 +93,11 @@ func _process(delta: float) -> void:
 	if _led:
 		_led.light_energy = 6.0 if sin(_blink_timer) > 0.0 else 0.2
 
-	if not is_3d and _marker_2d and is_instance_valid(_marker_2d):
-		_update_marker_2d()
+	if not is_3d:
+		if not _marker_2d or not is_instance_valid(_marker_2d):
+			_create_marker_2d()
+		else:
+			_update_marker_2d()
 
 	if not is_stuck:
 		return
@@ -111,10 +117,12 @@ func _process(delta: float) -> void:
 				explode()
 
 func _update_marker_2d() -> void:
-	if _prompt_label:
-		_prompt_label.visible = true
-
-	_marker_2d.modulate.a = 0.65 + sin(_blink_timer) * 0.35
+	if not _marker_2d or not is_instance_valid(_marker_2d):
+		return
+	var bx := clampf(global_position.x * 32.0, -420.0, 420.0)
+	var by := clampf(global_position.z * 32.0, -300.0, 300.0)
+	_marker_2d.position = Vector2(bx, by)
+	_marker_2d.modulate.a = 0.75 + sin(_blink_timer) * 0.25
 
 func explode() -> void:
 	if _exploded:

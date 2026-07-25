@@ -294,11 +294,17 @@ func _ai_3d_evade(to_enemy: Vector3) -> void:
 		away = Vector3.FORWARD
 		
 	# Compute an evade target away from Red, biased toward the map center when near edges.
-	var evade_target: Vector3 = self_pos + away * (7.0 if ai_difficulty == 2 else 5.0)
+	var evade_target: Vector3 = self_pos + away * (8.5 if ai_difficulty == 2 else 6.0)
 	var center_pull: Vector3 = Vector3.ZERO - self_pos
 	center_pull.y = 0.0
 	if absf(self_pos.x) > 9.5 or absf(self_pos.z) > 9.5:
-		evade_target += center_pull.normalized() * 4.0
+		evade_target += center_pull.normalized() * 5.0
+
+	# ── Survival Skills: Seek cover behind maze walls when low HP or under fire ──
+	if _health_ratio(ai_player_id) < 0.45:
+		var cover_pos := _find_best_cover_3d(self_pos)
+		if cover_pos != Vector3.ZERO:
+			evade_target = cover_pos
 	
 	# Mix in some perpendicular movement (dodging)
 	var perp := Vector3(-away.z, 0.0, away.x)
@@ -314,6 +320,33 @@ func _ai_3d_evade(to_enemy: Vector3) -> void:
 
 	if abs(dodge) > 0.75 and randf() < (0.08 if ai_difficulty == 2 else 0.04):
 		_virt_jump = true
+
+
+func _find_best_cover_3d(self_pos: Vector3) -> Vector3:
+	var nodes := [
+		Vector3(-10, 0.9, -10), Vector3(-10, 0.9, 10),
+		Vector3(10, 0.9, -10), Vector3(10, 0.9, 10),
+		Vector3(-4, 0.9, -8), Vector3(4, 0.9, 8)
+	]
+	var best_pos := Vector3.ZERO
+	var best_dist := INF
+	if not is_instance_valid(_enemy_3d):
+		return best_pos
+
+	var space := _body_3d.get_world_3d().direct_space_state
+	var enemy_head := _enemy_3d.global_position + Vector3.UP * 1.2
+
+	for n in nodes:
+		var query := PhysicsRayQueryParameters3D.create(enemy_head, n)
+		query.exclude = [_enemy_3d.get_rid(), _body_3d.get_rid()]
+		var hit := space.intersect_ray(query)
+		# If ray intersects a wall, node 'n' is behind cover!
+		if not hit.is_empty():
+			var d := self_pos.distance_to(n)
+			if d < best_dist:
+				best_dist = d
+				best_pos = n
+	return best_pos
 
 
 func _maybe_plant_clone_3d(preferred_pos: Vector3) -> void:

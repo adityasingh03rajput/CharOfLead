@@ -818,7 +818,10 @@ func _update_facing(move_dir: float) -> void:
 	elif _current_state == MoveState.WALL_RIGHT:
 		_facing_right = true
 	elif GameManager and GameManager.is_armed(player_id) and (not (NetworkManager and NetworkManager.is_online) or is_multiplayer_authority()):
-		var mouse_pos = get_global_mouse_position()
+		var mouse_pos: Vector2 = get_global_mouse_position()
+		if ai_controller and is_instance_valid(ai_controller):
+			var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
+			mouse_pos = ai_inp.get("mouse_world", mouse_pos)
 		_facing_right = mouse_pos.x > global_position.x
 	else:
 		if move_dir > 0.1:

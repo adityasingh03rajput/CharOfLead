@@ -1082,7 +1082,10 @@ func _animate_stickman(delta: float, move_dir: float, is_running: bool, is_crouc
 	if is_armed and not _is_dead and not _has_won:
 		var aim_vec := Vector2.RIGHT
 		if is_local:
-			var mouse_pos = get_global_mouse_position()
+			var mouse_pos: Vector2 = get_global_mouse_position()
+			if ai_controller and is_instance_valid(ai_controller):
+				var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
+				mouse_pos = ai_inp.get("mouse_world", mouse_pos)
 			# Localize mouse position to the skeleton to respect wall rotations
 			var local_mouse = _skeleton.to_local(mouse_pos)
 			
@@ -1215,7 +1218,11 @@ func _fire() -> void:
 	
 	var target_id: int = 1 if player_id == 2 else 2
 	var space := get_world_2d().direct_space_state
-	var mouse_pos = get_global_mouse_position()
+	var mouse_pos: Vector2 = get_global_mouse_position()
+	if ai_controller and is_instance_valid(ai_controller):
+		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
+		mouse_pos = ai_inp.get("mouse_world", mouse_pos)
+
 	var dir_to_target := (mouse_pos - global_position).normalized()
 	
 	var query := PhysicsRayQueryParameters2D.create(global_position, global_position + dir_to_target * weapon_range)

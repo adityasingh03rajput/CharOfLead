@@ -313,19 +313,50 @@ func _physics_process(delta: float) -> void:
 	# ── Camera-relative movement ──────────────────────────────────────────────
 	var input_dir := Input.get_vector(_act_left, _act_right, _act_up, _act_down)
 	var ai_fire := false
+	var is_ai := false
+	var ai_yaw := 0.0
 	if ai_controller and is_instance_valid(ai_controller):
 		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_3d")
+		is_ai = true
 		input_dir = ai_inp.get("move", Vector2.ZERO)
 		ai_fire = ai_inp.get("fire", false)
+		ai_yaw = float(ai_inp.get("cam_yaw", 0.0))
 		if ai_inp.has("weapon") and _weapon and is_instance_valid(_weapon):
 			_weapon.call("set_weapon", int(ai_inp["weapon"]))
 		if ai_inp.get("jump", false) and on_floor:
 			velocity.y = jump_velocity
+		var clone_pos = ai_inp.get("implant_clone", null)
+		var hop_num := int(ai_inp.get("body_hop", 0))
+		if clone_pos != null or hop_num > 0:
+			ai_controller.call("ack_oneshot_3d")
+		if clone_pos != null:
+			_implant_clone(clone_pos)
+		if hop_num > 0:
+			_try_body_hop(hop_num)
+			if _is_dead or is_idle_clone:
+				# The hop succeeded and this body is now a vacated shell —
+				# set_physics_process(false) only takes effect next frame.
+				return
 
 	var target_vel := Vector3.ZERO
 	var cam := get_viewport().get_camera_3d()
 
-	if not _has_won and cam:
+	if not _has_won and is_ai:
+		# The AI plans in world space. Routing its move vector through the local
+		# viewport camera would rotate its path by wherever the human is looking.
+		if input_dir != Vector2.ZERO:
+			target_vel = Vector3(input_dir.x, 0.0, input_dir.y).normalized() * top_speed
+
+		var shoot_t_ai: float = _weapon.get("shoot_t")
+		if ai_fire or shoot_t_ai > 0.0:
+			# AIController emits atan2(x, z); the rig faces atan2(-x, -z).
+			_visual_yaw = lerp_angle(_visual_yaw, ai_yaw + PI, 35.0 * delta)
+			if _rig(): _rig().rotation.y = _visual_yaw
+		elif input_dir != Vector2.ZERO:
+			var ty_ai := atan2(-target_vel.x, -target_vel.z)
+			_visual_yaw = lerp_angle(_visual_yaw, ty_ai, turn_speed * delta)
+			if _rig(): _rig().rotation.y = lerp_angle(_rig().rotation.y, _visual_yaw, 18.0 * delta)
+	elif not _has_won and cam:
 		var cf := -cam.global_transform.basis.z
 		var cr :=  cam.global_transform.basis.x
 		cf.y = 0.0
@@ -463,7 +494,7 @@ func _on_health_changed(pid: int, current: float, _maximum: float) -> void:
 		_weapon.set("hurt_t", 0.22)
 		_anim.call("trigger_hurt")
 		var cam := get_viewport().get_camera_3d()
-		if cam and cam.has_method("shake_hit"): cam.shake_hit()
+		if cam and ai_controller == null and cam.has_method("shake_hit"): cam.shake_hit()
 	if pid == player_id: _last_health = current
 
 
@@ -596,7 +627,14 @@ func _try_body_hop(cnum: int) -> void:
 	_on_player_died(player_id)
 
 	var cam := get_viewport().get_camera_3d()
-	if cam: cam.set("target", target_clone)
+	if cam and ai_controller == null: cam.set("target", target_clone)
+
+	if ai_controller and is_instance_valid(ai_controller):
+		# Move the brain into the new body, or it keeps driving the corpse.
+		var ctrl: Node = ai_controller
+		target_clone.set("ai_controller", ctrl)
+		self.ai_controller = null
+		ctrl.call("replace_body_3d", target_clone)
 
 	if _selector_ui: _selector_ui.visible = false
 	Engine.time_scale = 1.0

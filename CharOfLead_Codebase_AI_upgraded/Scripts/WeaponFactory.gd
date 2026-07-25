@@ -88,8 +88,17 @@ func throw_bomb() -> void:
 	grenade_cd = 1.0
 
 	var cam := _player.get_viewport().get_camera_3d()
-	var cam_fwd: Vector3 = -cam.global_transform.basis.z if cam else \
-		-_player.global_transform.basis.z
+	var ai_ctrl_b: Node = _player.get("ai_controller") if _player else null
+	var cam_fwd: Vector3
+	if ai_ctrl_b and is_instance_valid(ai_ctrl_b):
+		var ai_inp: Dictionary = ai_ctrl_b.call("get_virtual_input_3d")
+		cam_fwd = ai_inp.get("aim_dir", -_player.global_transform.basis.z)
+		if cam_fwd == Vector3.ZERO:
+			cam_fwd = -_player.global_transform.basis.z
+	elif cam:
+		cam_fwd = -cam.global_transform.basis.z
+	else:
+		cam_fwd = -_player.global_transform.basis.z
 	cam_fwd = cam_fwd.normalized()
 	var spawn_pos := _player.global_position + Vector3.UP * 1.4 + cam_fwd * 0.6
 	var vel := cam_fwd * 18.0 + Vector3(0, 7.5, 0)
@@ -212,7 +221,9 @@ func _fire() -> void:
 	if current_weapon == Weapon.SHOTGUN: active_gun = _gun_shotgun
 
 	var cam := _player.get_viewport().get_camera_3d()
-	if cam and cam.has_method("shake_fire"):
+	var ai_ctrl_fx: Node = _player.get("ai_controller") if _player else null
+	var is_ai_shot := ai_ctrl_fx != null and is_instance_valid(ai_ctrl_fx)
+	if cam and not is_ai_shot and cam.has_method("shake_fire"):
 		cam.shake_fire()
 
 	if _muzzle_flash:
@@ -241,6 +252,8 @@ func _fire() -> void:
 	var cam_dir   := -_player.global_transform.basis.z
 	var ai_ctrl: Node = _player.get("ai_controller") if _player else null
 	if ai_ctrl and is_instance_valid(ai_ctrl):
+		# An AI shot must leave the AI's own muzzle, not the local player's eye.
+		cam_from = muzzle_pos
 		var ai_inp: Dictionary = ai_ctrl.call("get_virtual_input_3d")
 		var aim_d: Vector3 = ai_inp.get("aim_dir", Vector3.ZERO)
 		if aim_d != Vector3.ZERO:
@@ -249,7 +262,7 @@ func _fire() -> void:
 		cam_dir = cam.project_ray_normal(screen_center)
 	var target_pos := cam_from + cam_dir * weapon_range
 
-	if cam:
+	if cam or is_ai_shot:
 		var cq := PhysicsRayQueryParameters3D.create(cam_from, target_pos)
 		var exc := [_player.get_rid()]
 		for child in _player.get_children():
@@ -259,9 +272,10 @@ func _fire() -> void:
 		var ch := space.intersect_ray(cq)
 		if ch: target_pos = ch.get("position")
 
-		var cur_pitch = cam.get("_pitch")
-		if cur_pitch != null:
-			cam.set("_pitch", cur_pitch + (2.5 if is_shotgun else 1.5))
+		if cam and not is_ai_shot:
+			var cur_pitch = cam.get("_pitch")
+			if cur_pitch != null:
+				cam.set("_pitch", cur_pitch + (2.5 if is_shotgun else 1.5))
 
 		var flat := (target_pos - _player.global_position)
 		flat.y = 0.0

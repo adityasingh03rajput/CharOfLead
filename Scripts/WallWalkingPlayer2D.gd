@@ -348,6 +348,9 @@ func _handle_grapple(delta: float, input_x: float, input_y: float) -> bool:
 	if not InputMap.has_action(grapple_action):
 		grapple_action = _act_fire
 	var fire_down    := Input.is_action_pressed(grapple_action)
+	if ai_controller and is_instance_valid(ai_controller):
+		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
+		fire_down = fire_down or bool(ai_inp.get("grapple", false))
 	var fire_pressed := fire_down and not _fire_was_down
 	_fire_was_down   = fire_down
 

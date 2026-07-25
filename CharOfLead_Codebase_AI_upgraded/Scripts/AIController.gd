@@ -41,12 +41,19 @@ var _grapple_timer: float = 0.0  # 2D grapple debounce
 var _body_hop_timer: float = 0.0 # P2 3D body-hop debounce
 var _clone_timer: float = 0.0    # P2 3D clone planting debounce
 var _tactic_timer: float = 0.0   # small tactical variation timer
+var _weapon_commit_timer: float = 0.0 # holds a weapon choice; switching costs 0.3s
+var _hurt_timer: float = 0.0     # set when damaged, biases the AI toward cover
+var _last_known_health: float = 100.0
 
 # ── Difficulty tuning tables ───────────────────────────────────────────────────
-const REACT_DELAY    := [0.55, 0.28, 0.05]   # seconds before acting
-const AIM_SPREAD     := [18.0, 7.0, 1.5]     # degrees of aim randomness
-const STRAFE_PERIOD  := [2.0,  1.4, 0.8]     # how often strafe direction flips
-const DECISION_RATE  := [0.7,  0.45, 0.2]    # how often AI re-picks a state
+# Tuned against real weapon stats: the rifle fires every 0.1s for 14 damage, so
+# REACT_DELAY is the real rate limiter on AI damage output. Values assume aim
+# and movement actually connect — before the input-contract fixes the AI shot
+# from the human's camera, so the old near-zero delay/spread was masking a miss.
+const REACT_DELAY    := [0.70, 0.34, 0.14]   # seconds before acting
+const AIM_SPREAD     := [22.0, 9.0, 3.5]     # degrees of aim randomness
+const STRAFE_PERIOD  := [2.0,  1.4, 0.9]     # how often strafe direction flips
+const DECISION_RATE  := [0.7,  0.45, 0.22]   # how often AI re-picks a state
 
 # ── Virtual input state (read by hooked player scripts each frame) ─────────────
 var _virt_move: Vector2 = Vector2.ZERO
@@ -88,6 +95,21 @@ func setup(body3d: CharacterBody3D, body2d: CharacterBody2D,
 	_enabled  = true
 	_state    = AIState.SEEK
 	_init_nav()
+	if is_instance_valid(GameManager) and not GameManager.health_changed.is_connected(_on_health_changed):
+		GameManager.health_changed.connect(_on_health_changed)
+	if is_instance_valid(GameManager):
+		_last_known_health = float(GameManager.get_health(ai_player_id))
+
+
+func _on_health_changed(pid: int, current: float, _maximum: float) -> void:
+	# Taking fire is the cue to break contact and use cover, rather than
+	# discovering the damage several polls later.
+	if pid != ai_player_id:
+		return
+	if current < _last_known_health:
+		_hurt_timer = 2.5
+		_decision_timer = 0.0
+	_last_known_health = current
 
 
 func get_virtual_input_2d() -> Dictionary:
@@ -119,6 +141,14 @@ func replace_body_3d(new_body: CharacterBody3D) -> void:
 	_body_3d = new_body
 
 
+func ack_oneshot_3d() -> void:
+	# The brain ticks in _process (render rate) but bodies act in
+	# _physics_process (fixed 60Hz), so a single command can be read twice on a
+	# dropped frame. The consumer acks to guarantee exactly-once.
+	_virt_clone_pos = null
+	_virt_body_hop = 0
+
+
 # ── Process ────────────────────────────────────────────────────────────────────
 func _process(delta: float) -> void:
 	if not _enabled:
@@ -133,6 +163,8 @@ func _process(delta: float) -> void:
 	_body_hop_timer  = maxf(_body_hop_timer - delta, 0.0)
 	_clone_timer     = maxf(_clone_timer - delta, 0.0)
 	_tactic_timer    = maxf(_tactic_timer - delta, 0.0)
+	_weapon_commit_timer = maxf(_weapon_commit_timer - delta, 0.0)
+	_hurt_timer      = maxf(_hurt_timer - delta, 0.0)
 
 	# Reset virtual inputs every frame so they don't "stick"
 	_virt_move  = Vector2.ZERO
@@ -316,7 +348,7 @@ func _ai_3d_evade(to_enemy: Vector3) -> void:
 		evade_target += center_pull.normalized() * 5.0
 
 	# ── Survival Skills: Seek cover behind maze walls when low HP or under fire ──
-	if _health_ratio(ai_player_id) < 0.45:
+	if _health_ratio(ai_player_id) < 0.45 or _hurt_timer > 0.0:
 		var cover_pos := _find_best_cover_3d(self_pos)
 		if cover_pos != Vector3.ZERO:
 			evade_target = cover_pos
@@ -446,25 +478,23 @@ func _aim_and_fire_3d() -> void:
 	var enemy_pos := _enemy_3d.global_position + Vector3.UP * 0.9
 
 	var dist := self_pos.distance_to(enemy_pos)
-	var has_los := _has_line_of_sight_3d()
 
-	# Dynamic Weapon Selection:
-	if not has_los and dist < 12.0 and randf() < 0.30:
-		_selected_weapon_3d = 3 # C4 Sticky Bomb to flush enemy out of cover!
-	elif dist < 5.5:
-		_selected_weapon_3d = 2 # Shotgun for close-quarters blast!
-	elif dist > 11.0:
-		_selected_weapon_3d = 1 # Assault Rifle for long range!
-	else:
-		_selected_weapon_3d = 0 # Pistol for fast mid-range sidearm!
+	# Dynamic Weapon Selection. Rifle is the DPS king at every range (140 vs 80
+	# pistol / 75 shotgun), and every switch costs 0.3s of dead time — so commit
+	# to a choice instead of re-picking each shot. Shotgun only inside knife
+	# range, where its 60-damage burst lands before the rifle can ramp.
+	# C4 is never selected: the AI cannot detonate it (KEY_G is human-only) and
+	# its own blast does ~33 damage back at 5m.
+	if _weapon_commit_timer <= 0.0:
+		var want_weapon := 2 if dist < 5.0 else 1
+		if want_weapon != _selected_weapon_3d:
+			_selected_weapon_3d = want_weapon
+			_weapon_commit_timer = 2.0
 
-	# Pro-level Target Trajectory Lead Shooting:
-	var enemy_vel: Vector3 = _enemy_3d.velocity if "velocity" in _enemy_3d else Vector3.ZERO
-	var lead_time: float = clampf(dist / 45.0, 0.0, 0.35)
-	var target_predicted := enemy_pos + enemy_vel * lead_time
-
+	# Weapons are hitscan, so aim at where the enemy is now — leading the target
+	# would place every shot ahead of them.
 	var spread: float = deg_to_rad(AIM_SPREAD[ai_difficulty])
-	var dir    := (target_predicted - self_pos).normalized()
+	var dir    := (enemy_pos - self_pos).normalized()
 	dir = dir.rotated(Vector3.UP,    randf_range(-spread, spread) * 0.4)
 	dir = dir.rotated(Vector3.RIGHT, randf_range(-spread, spread) * 0.25)
 	dir = dir.normalized()
@@ -540,6 +570,7 @@ func _ai_2d_strafe(to_enemy: Vector2, dist: float, enemy_pos: Vector2) -> void:
 	_virt_move.y = sign(to_enemy.y) if abs(to_enemy.y) > 140.0 else 0.0
 	if _virt_move.length_squared() > 1.0:
 		_virt_move = _virt_move.normalized()
+	_virt_move = _apply_surface_frame_2d(_virt_move, to_enemy)
 
 	_virt_mouse_world = _predict_enemy_2d(enemy_pos)
 
@@ -564,6 +595,9 @@ func _ai_2d_evade(to_enemy: Vector2) -> void:
 	var dodge := sin(Time.get_ticks_msec() * 0.004)
 	if abs(dodge) > 0.6:
 		_virt_jump = true
+	# Climb away from the enemy when wall-mounted; move.x would be discarded.
+	if _is_wall_mounted_2d():
+		_virt_move.y = -signf(to_enemy.y) if absf(to_enemy.y) > 40.0 else -1.0
 	_virt_mouse_world = _body_2d.global_position + to_enemy.normalized() * 200.0
 
 
@@ -590,7 +624,26 @@ func _smart_2d_move_toward(to_enemy: Vector2) -> Vector2:
 	move.y = sign(to_enemy.y) if abs(to_enemy.y) > 90.0 else 0.0
 	if move == Vector2.ZERO:
 		move.x = _strafe_dir
-	return move.normalized()
+	return _apply_surface_frame_2d(move.normalized(), to_enemy)
+
+
+func _is_wall_mounted_2d() -> bool:
+	# MoveState: 0=FLOOR 1=WALL_LEFT 2=WALL_RIGHT 3=CEILING 4=AIR 5=GRAPPLE
+	if not is_instance_valid(_body_2d):
+		return false
+	var st: int = int(_body_2d.get("_current_state"))
+	return st == 1 or st == 2
+
+
+func _apply_surface_frame_2d(move: Vector2, to_enemy: Vector2) -> Vector2:
+	# On a wall the body ignores move.x entirely (it is overwritten by the
+	# wall-stick velocity), so horizontal intent has to become vertical climb.
+	if _is_wall_mounted_2d():
+		var climb: float = signf(to_enemy.y)
+		if climb == 0.0:
+			climb = -1.0
+		return Vector2(move.x, climb)
+	return move
 
 
 func _has_line_of_sight_2d() -> bool:
@@ -606,10 +659,8 @@ func _has_line_of_sight_2d() -> bool:
 func _predict_enemy_2d(enemy_pos: Vector2) -> Vector2:
 	if not is_instance_valid(_enemy_2d):
 		return enemy_pos
-	var lead_time: float = REACT_DELAY[ai_difficulty] * 0.5
-	var predicted: Vector2 = enemy_pos + _enemy_2d.velocity * lead_time
+	# 2D fire is a hitscan raycast, so there is no travel time to lead.
 	var spread: float = AIM_SPREAD[ai_difficulty]
-	predicted += Vector2(
+	return enemy_pos + Vector2(
 		randf_range(-spread * 3.0, spread * 3.0),
 		randf_range(-spread * 2.0, spread * 2.0))
-	return predicted

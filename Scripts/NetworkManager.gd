@@ -8,6 +8,7 @@ signal connection_failed
 signal peer_disconnected
 
 const DEFAULT_PORT := 7777
+const DEFAULT_CLOUD_SERVER := "wss://sam3.onrender.com"
 
 var is_online:      bool = false
 var is_host:        bool = false
@@ -52,19 +53,25 @@ static func load_last_code() -> String:
 	return ""
 
 
-## Connect to a host using a Room Code, direct IP, or local testing shortcut.
+## Connect to a host using a Room Code, direct IP, domain, or Cloud Relay Server.
 ## Works in HTML5 / Chrome & Desktop.
 func start_join(code_or_ip: String, port: int = DEFAULT_PORT) -> String:
 	stop()
 	save_last_code(code_or_ip)
-	var target_ip := code_to_ip(code_or_ip)
-	
-	# Same-machine or APIPA detection: use loopback 127.0.0.1 for local testing
-	if target_ip == get_local_ip() or target_ip.begins_with("169.254.") or code_or_ip.strip_edges().to_lower() in ["local", "localhost", "127.0.0.1", "0", "me"]:
-		target_ip = "127.0.0.1"
+	var raw := code_or_ip.strip_edges()
+	var url := ""
+
+	if raw.begins_with("ws://") or raw.begins_with("wss://"):
+		url = raw
+	elif raw.contains("onrender.com") or raw.contains("playit.gg") or raw.contains("ngrok.io"):
+		url = "wss://%s" % raw.trim_prefix("https://").trim_prefix("http://")
+	else:
+		var target_ip := code_to_ip(raw)
+		if target_ip == get_local_ip() or target_ip.begins_with("169.254.") or raw.to_lower() in ["local", "localhost", "127.0.0.1", "0", "me"]:
+			target_ip = "127.0.0.1"
+		url = "ws://%s:%d" % [target_ip, port]
 
 	var peer := WebSocketMultiplayerPeer.new()
-	var url := "ws://%s:%d" % [target_ip, port]
 	var err := peer.create_client(url)
 	if err != OK:
 		return "Cannot connect to %s" % url

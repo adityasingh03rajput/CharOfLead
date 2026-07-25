@@ -13,6 +13,7 @@ var p1_2d: CharacterBody2D
 var p2_2d: CharacterBody2D
 
 var _hud_crosshair: ColorRect
+var ai_controller: Node = null
 
 # Spawn positions
 const P1_3D_SPAWN := Vector3(-8, 0.9, 8)
@@ -36,6 +37,8 @@ func _start_game() -> void:
 	GameManager.match_restarted.connect(_on_match_restarted)
 	if not GameManager.bomb_spawned.is_connected(_spawn_bomb_networked):
 		GameManager.bomb_spawned.connect(_spawn_bomb_networked)
+	if GameManager.ai_mode:
+		_setup_ai()
 	if NetworkManager.is_online:
 		_setup_network_authorities()
 		NetworkManager.notify_client_ready()
@@ -854,3 +857,25 @@ func _spawn_bomb_networked(spawn_pos: Vector3, vel: Vector3, ang: Vector3, pid: 
 	bomb.global_position  = spawn_pos
 	bomb.linear_velocity  = vel
 	bomb.angular_velocity = ang
+
+
+func _setup_ai() -> void:
+	var ai_script := load("res://Scripts/AIController.gd") as GDScript
+	if not ai_script:
+		return
+	ai_controller = Node.new()
+	ai_controller.name = "AIController"
+	ai_controller.set_script(ai_script)
+	ai_controller.set("ai_player_id", GameManager.ai_plays_as)
+	ai_controller.set("ai_difficulty", GameManager.ai_difficulty)
+	add_child(ai_controller)
+
+	var ai_3d := p2_3d if GameManager.ai_plays_as == 2 else p1_3d
+	var ai_2d := p2_2d if GameManager.ai_plays_as == 2 else p1_2d
+	var enemy_3d := p1_3d if GameManager.ai_plays_as == 2 else p2_3d
+	var enemy_2d := p1_2d if GameManager.ai_plays_as == 2 else p2_2d
+
+	if ai_3d: ai_3d.set("ai_controller", ai_controller)
+	if ai_2d: ai_2d.set("ai_controller", ai_controller)
+
+	ai_controller.call("setup", ai_3d, ai_2d, enemy_3d, enemy_2d)

@@ -24,6 +24,7 @@ const WPN_BOMB    = 3
 
 @export var player_id:     int   = 1
 @export var is_hunter:     bool  = false
+var ai_controller:        Node  = null
 @export var walk_speed:    float = 4.5
 @export var run_speed:     float = 8.0
 @export var gravity:       float = 20.0
@@ -311,6 +312,14 @@ func _physics_process(delta: float) -> void:
 
 	# ── Camera-relative movement ──────────────────────────────────────────────
 	var input_dir := Input.get_vector(_act_left, _act_right, _act_up, _act_down)
+	var ai_fire := false
+	if ai_controller and is_instance_valid(ai_controller):
+		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_3d")
+		input_dir = ai_inp.get("move", Vector2.ZERO)
+		ai_fire = ai_inp.get("fire", false)
+		if ai_inp.get("jump", false) and on_floor:
+			velocity.y = jump_velocity
+
 	var target_vel := Vector3.ZERO
 	var cam := get_viewport().get_camera_3d()
 
@@ -322,9 +331,9 @@ func _physics_process(delta: float) -> void:
 		cf = cf.normalized()
 		cr.y = 0.0; cr = cr.normalized()
 
-		var is_aiming := GameManager and GameManager.is_armed(player_id) and (
+		var is_aiming := (GameManager and GameManager.is_armed(player_id) and (
 			Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or
-			Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))
+			Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))) or ai_fire
 
 		if input_dir != Vector2.ZERO:
 			target_vel = (cr * input_dir.x + cf * -input_dir.y).normalized() * top_speed

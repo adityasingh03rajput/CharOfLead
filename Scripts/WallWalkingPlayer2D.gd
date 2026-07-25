@@ -4,6 +4,7 @@ extends CharacterBody2D
 
 @export var player_id: int = 2
 @export var is_assassin: bool = false
+var ai_controller: Node = null
 @export var speed: float = 220.0
 @export var gravity: float = 980.0
 @export var jump_force: float = 520.0
@@ -647,6 +648,14 @@ func _physics_process(delta: float) -> void:
 	var is_running := Input.is_key_pressed(KEY_SHIFT) if _input_pid == 1 else Input.is_key_pressed(KEY_CTRL)
 	var is_crouching := Input.is_action_pressed(_act_down)
 
+	if ai_controller and is_instance_valid(ai_controller):
+		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
+		var mv: Vector2 = ai_inp.get("move", Vector2.ZERO)
+		input_x = mv.x
+		input_y = mv.y
+		if ai_inp.get("jump", false) and is_on_floor() and not _is_dead:
+			velocity.y = -jump_force
+
 	# --- Grapple (victim only): F toggles aim, Ctrl+WASD steers reticle, F fires,
 	# E bails. While steering the reticle, WASD drives it instead of the body. ---
 	var steering_reticle := _handle_grapple(delta, input_x, input_y)
@@ -755,6 +764,9 @@ func _physics_process(delta: float) -> void:
 		if GameManager and GameManager.is_armed(player_id) and not _is_dead:
 			_gun.visible = true
 			var mouse_pos = get_global_mouse_position()
+			if ai_controller and is_instance_valid(ai_controller):
+				var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
+				mouse_pos = ai_inp.get("mouse_world", mouse_pos)
 			_gun.position = _current_points["hand_r"]
 			var world_angle := (mouse_pos - _gun.global_position).angle()
 			_gun.global_rotation = world_angle
@@ -766,7 +778,11 @@ func _physics_process(delta: float) -> void:
 			_gun.visible = false
 
 	if GameManager and GameManager.is_armed(player_id) and not _is_dead:
-		if _cd <= 0.0 and (Input.is_action_just_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)):
+		var fire_pressed := Input.is_action_just_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		if ai_controller and is_instance_valid(ai_controller):
+			var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
+			fire_pressed = fire_pressed or ai_inp.get("fire", false)
+		if _cd <= 0.0 and fire_pressed:
 			_fire()
 
 

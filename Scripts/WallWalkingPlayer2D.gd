@@ -656,8 +656,14 @@ func _physics_process(delta: float) -> void:
 		var mv: Vector2 = ai_inp.get("move", Vector2.ZERO)
 		input_x = mv.x
 		input_y = mv.y
-		if ai_inp.get("jump", false) and is_on_floor() and not _is_dead:
-			velocity.y = -jump_force
+		if ai_inp.get("jump", false) and not _is_dead:
+			if is_on_floor():
+				velocity.y = -jump_force
+			elif is_on_wall():
+				velocity.y = -jump_force * 0.8
+				velocity.x = get_wall_normal().x * speed
+			elif is_on_ceiling():
+				velocity.y = jump_force * 0.5
 
 	# --- Grapple (victim only): F toggles aim, Ctrl+WASD steers reticle, F fires,
 	# E bails. While steering the reticle, WASD drives it instead of the body. ---

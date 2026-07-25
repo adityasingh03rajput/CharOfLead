@@ -741,16 +741,20 @@ func _smart_2d_move_toward(to_enemy: Vector2) -> Vector2:
 			return _apply_surface_frame_2d(astar_dir, to_enemy)
 
 	var move := Vector2.ZERO
-	move.x = sign(to_enemy.x) if abs(to_enemy.x) > 35.0 else 0.0
-	move.y = sign(to_enemy.y) if abs(to_enemy.y) > 90.0 else 0.0
+	move.x = signf(to_enemy.x)
+	if move.x == 0.0:
+		move.x = 1.0
+	move.y = signf(to_enemy.y) if absf(to_enemy.y) > 40.0 else 0.0
 
-	if is_instance_valid(_body_2d) and _body_2d.is_on_wall():
-		# Bumping wall horizontally -> jump to leap over shelf or mount wall!
-		move.y = signf(to_enemy.y) if absf(to_enemy.y) > 20.0 else -1.0
-		_virt_jump = true
+	if is_instance_valid(_body_2d):
+		if _body_2d.is_on_wall():
+			move.x = -signf(to_enemy.x)
+			if move.x == 0.0: move.x = -1.0
+			move.y = -1.0
+			_virt_jump = true
+		elif _body_2d.is_on_ceiling() and absf(to_enemy.y) > 40.0:
+			_virt_jump = true # Drop off ceiling!
 
-	if move == Vector2.ZERO:
-		move.x = _strafe_dir
 	return _apply_surface_frame_2d(move.normalized(), to_enemy)
 
 

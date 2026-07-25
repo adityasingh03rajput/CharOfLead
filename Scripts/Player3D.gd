@@ -317,6 +317,8 @@ func _physics_process(delta: float) -> void:
 		var ai_inp: Dictionary = ai_controller.call("get_virtual_input_3d")
 		input_dir = ai_inp.get("move", Vector2.ZERO)
 		ai_fire = ai_inp.get("fire", false)
+		if ai_inp.has("weapon") and _weapon and is_instance_valid(_weapon):
+			_weapon.call("set_weapon", int(ai_inp["weapon"]))
 		if ai_inp.get("jump", false) and on_floor:
 			velocity.y = jump_velocity
 
@@ -373,11 +375,11 @@ func _physics_process(delta: float) -> void:
 	if is_hunter and GameManager and GameManager.is_armed(player_id) \
 			and not _has_won and _melee_t <= 0.0 and not _is_prone:
 		var cur_wpn: int = _weapon.get("current_weapon")
-		var firing := false
+		var firing := ai_fire
 		if cur_wpn == WPN_RIFLE:
-			firing = Input.is_action_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+			firing = firing or Input.is_action_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		else:
-			firing = Input.is_action_just_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+			firing = firing or Input.is_action_just_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		if firing: _weapon.call("try_fire")
 
 	# ── Locomotion + animation ────────────────────────────────────────────────

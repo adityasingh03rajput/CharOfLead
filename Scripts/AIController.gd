@@ -57,6 +57,7 @@ var _virt_body_hop: int = 0
 var _virt_clone_pos = null
 var _virt_mouse_world: Vector2 = Vector2.ZERO  # 2D aim target
 var _virt_aim_dir_3d: Vector3 = Vector3.FORWARD # 3D aim direction
+var _selected_weapon_3d: int = 1               # 0=Pistol, 1=Rifle, 2=Shotgun, 3=Bomb
 
 # ── Strafe orbit state ─────────────────────────────────────────────────────────
 var _orbit_angle: float = 0.0
@@ -104,6 +105,7 @@ func get_virtual_input_3d() -> Dictionary:
 		"move":    _virt_move,
 		"fire":    _virt_fire,
 		"jump":    _virt_jump,
+		"weapon":  _selected_weapon_3d,
 		"aim_dir": _virt_aim_dir_3d,
 		"cam_yaw": _ai_cam_yaw,
 		"body_hop": _virt_body_hop,
@@ -443,13 +445,31 @@ func _aim_and_fire_3d() -> void:
 	var self_pos  := _body_3d.global_position + Vector3.UP * 1.2
 	var enemy_pos := _enemy_3d.global_position + Vector3.UP * 0.9
 
+	var dist := self_pos.distance_to(enemy_pos)
+	var has_los := _has_line_of_sight_3d()
+
+	# Dynamic Weapon Selection:
+	if not has_los and dist < 12.0 and randf() < 0.30:
+		_selected_weapon_3d = 3 # C4 Sticky Bomb to flush enemy out of cover!
+	elif dist < 5.5:
+		_selected_weapon_3d = 2 # Shotgun for close-quarters blast!
+	elif dist > 11.0:
+		_selected_weapon_3d = 1 # Assault Rifle for long range!
+	else:
+		_selected_weapon_3d = 0 # Pistol for fast mid-range sidearm!
+
+	# Pro-level Target Trajectory Lead Shooting:
+	var enemy_vel: Vector3 = _enemy_3d.velocity if "velocity" in _enemy_3d else Vector3.ZERO
+	var lead_time: float = clampf(dist / 45.0, 0.0, 0.35)
+	var target_predicted := enemy_pos + enemy_vel * lead_time
+
 	var spread: float = deg_to_rad(AIM_SPREAD[ai_difficulty])
-	var dir    := (enemy_pos - self_pos).normalized()
-	dir = dir.rotated(Vector3.UP,    randf_range(-spread, spread) * 0.5)
-	dir = dir.rotated(Vector3.RIGHT, randf_range(-spread, spread) * 0.3)
+	var dir    := (target_predicted - self_pos).normalized()
+	dir = dir.rotated(Vector3.UP,    randf_range(-spread, spread) * 0.4)
+	dir = dir.rotated(Vector3.RIGHT, randf_range(-spread, spread) * 0.25)
 	dir = dir.normalized()
 
-	_virt_aim_dir_3d = dir   # ← correct var name (was wrong in earlier draft)
+	_virt_aim_dir_3d = dir
 	_virt_fire       = true
 	_react_timer     = REACT_DELAY[ai_difficulty]
 

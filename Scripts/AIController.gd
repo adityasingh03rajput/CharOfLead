@@ -44,6 +44,10 @@ var _tactic_timer: float = 0.0   # small tactical variation timer
 var _weapon_commit_timer: float = 0.0 # holds a weapon choice; switching costs 0.3s
 var _hurt_timer: float = 0.0     # set when damaged, biases the AI toward cover
 var _last_known_health: float = 100.0
+var _stuck_2d_timer: float = 0.0 # tracks 2D movement stagnation
+var _last_2d_pos: Vector2 = Vector2.ZERO
+var _unstick_flank_timer: float = 0.0
+var _unstick_flank_dir: float = 1.0
 
 # ── Difficulty tuning tables ───────────────────────────────────────────────────
 # Tuned against real weapon stats: the rifle fires every 0.1s for 14 damage, so
@@ -165,6 +169,22 @@ func _process(delta: float) -> void:
 	_tactic_timer    = maxf(_tactic_timer - delta, 0.0)
 	_weapon_commit_timer = maxf(_weapon_commit_timer - delta, 0.0)
 	_hurt_timer      = maxf(_hurt_timer - delta, 0.0)
+	_unstick_flank_timer = maxf(_unstick_flank_timer - delta, 0.0)
+
+	# ── 2D Stuck Detection (Unsticking Logic) ─────────────────────────────
+	if not GameManager.is_3d_mode and is_instance_valid(_body_2d):
+		var pos_2d := _body_2d.global_position
+		if pos_2d.distance_to(_last_2d_pos) < 3.0:
+			_stuck_2d_timer += delta
+		else:
+			_stuck_2d_timer = 0.0
+		_last_2d_pos = pos_2d
+
+		if _stuck_2d_timer > 0.22:
+			_unstick_flank_timer = 0.55
+			_unstick_flank_dir = -signf(_virt_move.x) if _virt_move.x != 0.0 else -_strafe_dir
+			if _unstick_flank_dir == 0.0: _unstick_flank_dir = 1.0
+			_stuck_2d_timer = 0.0
 
 	# Reset virtual inputs every frame so they don't "stick"
 	_virt_move  = Vector2.ZERO
@@ -552,6 +572,13 @@ func _ai_2d_seek(to_enemy: Vector2, enemy_pos: Vector2) -> void:
 	_virt_move = _smart_2d_move_toward(to_enemy)
 	_virt_mouse_world = _predict_enemy_2d(enemy_pos)
 
+	# ── Emergency Unstick Override ─────────────────────────────────────────
+	if _unstick_flank_timer > 0.0:
+		_virt_move.x = _unstick_flank_dir
+		_virt_move.y = -1.0 # hold UP to mount/climb
+		_virt_jump = true   # leap off obstruction!
+		return
+
 	# ── Intelligent Wall & Ledge Navigation ────────────────────────────────
 	if not has_los and is_instance_valid(_body_2d):
 		var is_on_wall: bool = _body_2d.is_on_wall()
@@ -562,8 +589,8 @@ func _ai_2d_seek(to_enemy: Vector2, enemy_pos: Vector2) -> void:
 			var climb_dir := signf(to_enemy.y)
 			if climb_dir == 0.0: climb_dir = -1.0
 			_virt_move.y = climb_dir
-			if randf() < 0.4:
-				_virt_jump = true # Jump off/up wall to negotiate corners
+			_virt_move.x = -signf(to_enemy.x) # step BACK from wall face to allow leap!
+			_virt_jump = true
 		elif absf(to_enemy.y) > 40.0:
 			# Enemy is on another shelf level -> jump to climb or drop
 			if to_enemy.y < -40.0 and _body_2d.is_on_floor():

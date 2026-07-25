@@ -98,10 +98,8 @@ func throw_bomb() -> void:
 		randf_range(-8.0,  8.0),
 		randf_range(-14.0, 14.0))
 
-	_spawn_bomb_instance(spawn_pos, vel, ang, _player_id)
-
-	if NetworkManager and NetworkManager.is_online:
-		rpc("_rpc_net_throw_bomb", spawn_pos, vel, ang, _player_id)
+	if GameManager:
+		GameManager.spawn_bomb_networked(spawn_pos, vel, ang, _player_id)
 
 	if _gun_bomb:
 		_gun_bomb.position  = GUN_REST + Vector3(0, 0.25, -0.35)

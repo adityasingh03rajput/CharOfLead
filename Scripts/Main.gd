@@ -34,6 +34,8 @@ func _start_game() -> void:
 	GameManager.mode_changed.connect(_on_mode_changed)
 	_on_mode_changed(GameManager.is_3d_mode)
 	GameManager.match_restarted.connect(_on_match_restarted)
+	if not GameManager.bomb_spawned.is_connected(_spawn_bomb_networked):
+		GameManager.bomb_spawned.connect(_spawn_bomb_networked)
 	if NetworkManager.is_online:
 		_setup_network_authorities()
 		NetworkManager.notify_client_ready()
@@ -802,3 +804,53 @@ func _add_help_line(parent: VBoxContainer, key: String, action: String) -> void:
 	action_label.add_theme_font_size_override("font_size", 18)
 	action_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9))
 	hbox.add_child(action_label)
+
+
+func _spawn_bomb_networked(spawn_pos: Vector3, vel: Vector3, ang: Vector3, pid: int) -> void:
+	var bomb := RigidBody3D.new()
+	bomb.contact_monitor = true
+	bomb.max_contacts_reported = 4
+
+	var cs   := CollisionShape3D.new()
+	var bshp := BoxShape3D.new()
+	bshp.size = Vector3(0.2, 0.12, 0.3)
+	cs.shape = bshp
+	bomb.add_child(cs)
+
+	var mi   := MeshInstance3D.new()
+	var bm   := BoxMesh.new()
+	bm.size  = Vector3(0.2, 0.12, 0.3)
+	var bmat := StandardMaterial3D.new()
+	bmat.albedo_color = Color(0.2, 0.22, 0.25)
+	bmat.roughness    = 0.7
+	bm.material = bmat
+	mi.mesh = bm
+	bomb.add_child(mi)
+
+	var strip := MeshInstance3D.new()
+	var sm    := BoxMesh.new()
+	sm.size   = Vector3(0.21, 0.03, 0.1)
+	var smat  := StandardMaterial3D.new()
+	smat.albedo_color          = Color(0.95, 0.15, 0.1)
+	smat.emission_enabled      = true
+	smat.emission              = Color(0.95, 0.15, 0.1)
+	smat.emission_energy_multiplier = 1.5
+	sm.material  = smat
+	strip.position = Vector3(0, 0.05, 0)
+	bomb.add_child(strip)
+
+	var led := OmniLight3D.new()
+	led.name          = "LEDLight"
+	led.light_color   = Color(1.0, 0.1, 0.1)
+	led.light_energy  = 3.0
+	led.omni_range    = 2.5
+	bomb.add_child(led)
+
+	bomb.set_script(preload("res://Scripts/Bomb.gd"))
+	bomb.set_process(true)
+	bomb.set("owner_id", pid)
+
+	add_child(bomb)
+	bomb.global_position  = spawn_pos
+	bomb.linear_velocity  = vel
+	bomb.angular_velocity = ang

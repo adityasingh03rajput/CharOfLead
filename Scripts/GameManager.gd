@@ -14,8 +14,23 @@ signal swap_incoming(next_is_3d_mode)   # fired warning_lead_time before a swap
 signal health_changed(player_id, current, maximum)
 signal player_died(player_id)
 signal game_over(winner_id)
-signal damage_dealt(target_id, amount)   # a shot actually connected (for hit markers)
-signal weapon_changed(player_id, weapon_name)
+signal damage_dealt(target_id: int, amount: float)
+signal weapon_changed(pid: int, weapon_name: String)
+signal bomb_spawned(spawn_pos: Vector3, vel: Vector3, ang: Vector3, pid: int)
+signal bomb_exploded(bomb_node: Node)
+
+
+func spawn_bomb_networked(spawn_pos: Vector3, vel: Vector3, ang: Vector3, pid: int) -> void:
+	bomb_spawned.emit(spawn_pos, vel, ang, pid)
+	var nm = get_node_or_null("/root/NetworkManager")
+	if nm and nm.is_online:
+		rpc("_rpc_sync_spawn_bomb", spawn_pos, vel, ang, pid)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_sync_spawn_bomb(spawn_pos: Vector3, vel: Vector3, ang: Vector3, pid: int) -> void:
+	if not is_inside_tree(): return
+	bomb_spawned.emit(spawn_pos, vel, ang, pid)
 
 @export var min_swap_time: float = 15.0
 @export var max_swap_time: float = 45.0

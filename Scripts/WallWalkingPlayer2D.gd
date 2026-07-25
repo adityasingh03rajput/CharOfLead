@@ -763,12 +763,12 @@ func _physics_process(delta: float) -> void:
 	if _gun:
 		if GameManager and GameManager.is_armed(player_id) and not _is_dead:
 			_gun.visible = true
-			var mouse_pos = get_global_mouse_position()
+			var mouse_pos: Vector2 = get_global_mouse_position()
 			if ai_controller and is_instance_valid(ai_controller):
 				var ai_inp: Dictionary = ai_controller.call("get_virtual_input_2d")
 				mouse_pos = ai_inp.get("mouse_world", mouse_pos)
 			_gun.position = _current_points["hand_r"]
-			var world_angle := (mouse_pos - _gun.global_position).angle()
+			var world_angle: float = (mouse_pos - _gun.global_position).angle()
 			_gun.global_rotation = world_angle
 			if mouse_pos.x < _gun.global_position.x:
 				_gun.scale.y = -1.0

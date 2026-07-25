@@ -283,7 +283,7 @@ func _has_line_of_sight_3d() -> bool:
 
 
 func _ai_3d_evade(to_enemy: Vector3) -> void:
-	var self_pos = _body_3d.global_position
+	var self_pos: Vector3 = _body_3d.global_position
 	var away := -to_enemy
 	away.y = 0.0
 	if away.length_squared() > 0.01:
@@ -292,8 +292,8 @@ func _ai_3d_evade(to_enemy: Vector3) -> void:
 		away = Vector3.FORWARD
 		
 	# Compute an evade target away from Red, biased toward the map center when near edges.
-	var evade_target = self_pos + away * (7.0 if ai_difficulty == 2 else 5.0)
-	var center_pull := Vector3.ZERO - self_pos
+	var evade_target: Vector3 = self_pos + away * (7.0 if ai_difficulty == 2 else 5.0)
+	var center_pull: Vector3 = Vector3.ZERO - self_pos
 	center_pull.y = 0.0
 	if absf(self_pos.x) > 9.5 or absf(self_pos.z) > 9.5:
 		evade_target += center_pull.normalized() * 4.0
@@ -508,7 +508,7 @@ func _ai_2d_grapple_escape(to_enemy: Vector2) -> void:
 		_virt_grapple = true
 		_grapple_timer = 1.4
 	# Bias reticle steering upward and away from the assassin so escapes choose walls/ceiling.
-	var x_dir := -sign(to_enemy.x)
+	var x_dir: float = -signf(to_enemy.x)
 	if x_dir == 0.0:
 		x_dir = _strafe_dir
 	_virt_move = Vector2(x_dir, -1.0).normalized()

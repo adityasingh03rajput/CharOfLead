@@ -198,13 +198,15 @@ func _ready() -> void:
 # ── Helper called by WeaponFactory to snap visual yaw on fire ─────────────────
 func _sync_visual_yaw(yaw: float) -> void:
 	_visual_yaw = yaw
-	var rig: Node3D = _skeleton.get("rig")
+	var rig: Node3D = (_skeleton.get("rig") as Node3D) if (_skeleton and is_instance_valid(_skeleton)) else null
 	if rig: rig.rotation.y = _visual_yaw
 
 
 # ── Convenience accessors to avoid repeated get() calls ──────────────────────
 func _rig() -> Node3D:
-	return _skeleton.get("rig") as Node3D
+	if _skeleton and is_instance_valid(_skeleton):
+		return _skeleton.get("rig") as Node3D
+	return null
 
 
 # ====================================================================
@@ -215,9 +217,8 @@ func _physics_process(delta: float) -> void:
 		_remote_anim(delta)
 		return
 
-	if _is_dead: return
-
-	_weapon.call("tick", delta)
+	if _weapon and is_instance_valid(_weapon):
+		_weapon.call("tick", delta)
 	if _melee_t > 0.0: _melee_t -= delta
 
 	var on_floor := is_on_floor()
@@ -246,11 +247,14 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		var rig_yaw2 := (_rig().rotation.y if _rig() else 0.0)
 		var tp2 = _anim.call("compute", delta, false, false, false, false,
-			false, false, 0.0, _visual_yaw, rig_yaw2)
+			false, false, 0.0, _visual_yaw, rig_yaw2) if (_anim and is_instance_valid(_anim)) else {}
 		if not tp2 is Dictionary: tp2 = {}
-		_head_ctrl.call("contribute", tp2, delta, false, false, false, rig_yaw2)
-		_secondary.call("contribute", tp2, delta)
-		_anim.call("apply_pose", tp2, delta)
+		if _head_ctrl and is_instance_valid(_head_ctrl):
+			_head_ctrl.call("contribute", tp2, delta, false, false, false, rig_yaw2)
+		if _secondary and is_instance_valid(_secondary):
+			_secondary.call("contribute", tp2, delta)
+		if _anim and is_instance_valid(_anim):
+			_anim.call("apply_pose", tp2, delta)
 		return
 
 	# ── Coyote + jump buffer ──────────────────────────────────────────────────
@@ -347,7 +351,7 @@ func _physics_process(delta: float) -> void:
 		if input_dir != Vector2.ZERO:
 			target_vel = Vector3(input_dir.x, 0.0, input_dir.y).normalized() * top_speed
 
-		var shoot_t_ai: float = _weapon.get("shoot_t")
+		var shoot_t_ai: float = float(_weapon.get("shoot_t")) if (_weapon and is_instance_valid(_weapon)) else 0.0
 		if ai_fire or shoot_t_ai > 0.0:
 			# AIController emits atan2(x, z); the rig faces atan2(-x, -z).
 			_visual_yaw = lerp_angle(_visual_yaw, ai_yaw + PI, 35.0 * delta)
@@ -371,7 +375,7 @@ func _physics_process(delta: float) -> void:
 		if input_dir != Vector2.ZERO:
 			target_vel = (cr * input_dir.x + cf * -input_dir.y).normalized() * top_speed
 
-		var shoot_t: float = _weapon.get("shoot_t")
+		var shoot_t: float = float(_weapon.get("shoot_t")) if (_weapon and is_instance_valid(_weapon)) else 0.0
 		if is_aiming or shoot_t > 0.0:
 			var ty := atan2(-cf.x, -cf.z)
 			_visual_yaw = lerp_angle(_visual_yaw, ty, 35.0 * delta)
@@ -404,8 +408,8 @@ func _physics_process(delta: float) -> void:
 
 	# ── Firing ────────────────────────────────────────────────────────────────
 	if is_hunter and GameManager and GameManager.is_armed(player_id) \
-			and not _has_won and _melee_t <= 0.0 and not _is_prone:
-		var cur_wpn: int = _weapon.get("current_weapon")
+			and not _has_won and _melee_t <= 0.0 and not _is_prone and _weapon and is_instance_valid(_weapon):
+		var cur_wpn: int = int(_weapon.get("current_weapon")) if (_weapon and is_instance_valid(_weapon)) else WPN_PISTOL
 		var firing := ai_fire
 		if cur_wpn == WPN_RIFLE:
 			firing = firing or Input.is_action_pressed(_act_fire) or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)

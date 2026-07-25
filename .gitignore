@@ -1,3 +1,24 @@
+# Godot 4+ cache & imports
 .godot/
-.claude/
-scratch/
+*.import
+
+# Web, Executable & Deployment builds
+dist/
+Build/
+builds/
+.netlify/
+CharOfLead_Build.zip
+
+# Python & Temporary Files
+__pycache__/
+*.pyc
+*.log
+*.tmp
+server_local.py
+patch*.py
+dump_*
+anim_out*.txt
+
+# OS / Editor Specific
+.DS_Store
+Thumbs.db

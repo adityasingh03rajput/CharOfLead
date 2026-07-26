@@ -160,6 +160,18 @@ func ack_oneshot_3d() -> void:
 	_virt_body_hop = 0
 
 
+## Freeze every virtual input channel — called whenever the AI or its
+## target is dead/respawning so no stale movement bleeds into the next round.
+func _zero_virtual_inputs() -> void:
+	_virt_move        = Vector2.ZERO
+	_virt_fire        = false
+	_virt_jump        = false
+	_virt_grapple     = false
+	_virt_body_hop    = 0
+	_virt_clone_pos   = null
+	_virt_mouse_world = _virt_mouse_world  # keep aim point stable (cosmetic)
+
+
 # ── Process ────────────────────────────────────────────────────────────────────
 func _process(delta: float) -> void:
 	if not _enabled:
@@ -623,8 +635,19 @@ func _aim_and_fire_3d() -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 func _tick_2d(delta: float) -> void:
 	if not is_instance_valid(_body_2d) or not is_instance_valid(_enemy_2d):
+		_zero_virtual_inputs()
 		return
-	if _body_2d.get("_is_dead") or _enemy_2d.get("_is_dead"):
+	if _body_2d.get("_is_dead"):
+		# AI itself is dead — stop all inputs and clear navigation state.
+		_zero_virtual_inputs()
+		_tactical_path_2d.clear()
+		return
+	if _enemy_2d.get("_is_dead"):
+		# Target is dead / respawning — freeze in place, clear path, wait.
+		_zero_virtual_inputs()
+		_tactical_path_2d.clear()
+		_replan_timer_2d = 1.5  # wait 1.5s before re-evaluating after kill
+		_last_los_state = false
 		return
 
 	if _tactical_graph_2d == null:
@@ -650,7 +673,8 @@ func _tick_2d(delta: float) -> void:
 		"is_on_floor": _body_2d.is_on_floor(),
 		"stuck": _stuck_2d_timer > 0.25,
 		"target_dist": dist,
-		"health_ratio": _health_ratio(ai_player_id)
+		"health_ratio": _health_ratio(ai_player_id),
+		"target_dead": _enemy_2d.get("_is_dead") == true
 	}
 
 	var should_replan := _tactical_path_2d.is_empty() or (_replan_timer_2d <= 0.0 and (enemy_pos.distance_to(_last_target_enemy_pos) > 90.0 or has_los != _last_los_state))

@@ -316,6 +316,8 @@ var _last_los_state: bool = false
 var _path_age_2d: float = 0.0      # seconds since last path was computed
 var _active_goal_2d: int = -1      # last GOAP goal chosen
 var _current_node_score: float = -999999.0  # score of the incumbent tactical node
+var _traversal_executor_2d: RefCounted = null
+var _traversal_edges_2d: Array[Dictionary] = []
 
 func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	if _is_path_clear_2d(self_pos, target_pos):
@@ -324,15 +326,30 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 				_virt_jump = true # Push off wall/ceiling into open air!
 		return (target_pos - self_pos).normalized()
 
-	# If direct line-of-sight is blocked, use tactical graph pathfinding
+	# ── TraversalExecutor2D: Data-driven event-based macro execution ───────
+	if not _traversal_edges_2d.is_empty() and _traversal_executor_2d != null:
+		var exec_res: Dictionary = _traversal_executor_2d.call("tick", get_process_delta_time(), _body_2d, self_pos)
+		if exec_res.get("jump", false):
+			_virt_jump = true
+		if exec_res.get("grapple", false):
+			_virt_grapple = true
+
+		if exec_res.get("completed", false):
+			_traversal_edges_2d.pop_front()
+			if not _traversal_edges_2d.is_empty():
+				_traversal_executor_2d.call("start_edge", _traversal_edges_2d[0], self_pos)
+
+		var move_vec: Vector2 = exec_res.get("move", Vector2.ZERO)
+		if move_vec.length_squared() > 0.01:
+			var nav_tag := "RED 2D AI NAV" if ai_player_id == 1 else "BLUE 2D AI NAV"
+			print("[%s] Traversal Macro | Move: %s | Jump: %s" % [nav_tag, move_vec, _virt_jump])
+			return move_vec.normalized()
+
+	# Fallback: Spatial graph pathfinding if traversal edges empty
 	if not _tactical_path_2d.is_empty():
 		var waypoint: Vector2 = _tactical_path_2d[0]
 
 		# ── Waypoint arrival: axis-separated thresholds ──────────────────────
-		# On a wall the AI can never close the full 2D distance because gravity
-		# keeps pulling it away from the waypoint's Y. Check each axis separately:
-		# • If X is aligned (within 30px) and Y is within 55px → pop on wall.
-		# • On floor/air use a flat 40px radius as before.
 		var on_wall := is_instance_valid(_body_2d) and _body_2d.is_on_wall()
 		var arrived := false
 		if on_wall:
@@ -352,7 +369,6 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 				var is_stuck := _stuck_2d_timer > 0.1 or _unstick_flank_timer > 0.0
 				var x_offset := absf(waypoint.x - self_pos.x)
 
-				# Raycast overhead to detect inside corners / shelf ceilings above
 				var space := _body_2d.get_world_2d().direct_space_state
 				var overhead_blocked := false
 				if space and waypoint.y < self_pos.y:
@@ -361,16 +377,14 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 					ray_q.exclude = [_body_2d.get_rid()]
 					overhead_blocked = not space.intersect_ray(ray_q).is_empty()
 
-				# If waypoint is horizontally offset (> 16px), or we're at a ceiling corner, overhead is blocked, or stuck:
 				if x_offset > 16.0 or on_corner_ceiling or overhead_blocked or is_stuck:
-					_virt_jump = true # Leap off wall into open air around corner!
+					_virt_jump = true
 				else:
-					# Climb along wall face toward waypoint's Y coordinate
 					way_dir.y = signf(waypoint.y - self_pos.y)
 					way_dir.x = 0.0
 			elif _body_2d.is_on_ceiling():
 				if waypoint.y > self_pos.y + 20.0 or _stuck_2d_timer > 0.1:
-					_virt_jump = true # Drop off ceiling into open air!
+					_virt_jump = true
 			elif absf(waypoint.x - self_pos.x) < 35.0 and waypoint.y < self_pos.y - 30.0 and _body_2d.is_on_floor():
 				_virt_jump = true
 		var nav_tag := "RED 2D AI NAV" if ai_player_id == 1 else "BLUE 2D AI NAV"
@@ -733,6 +747,11 @@ func _tick_2d(delta: float) -> void:
 		var new_node_id: int = eval_result.get("id", -1)
 		var new_score: float = eval_result.get("score", -999999.0)
 
+		if _traversal_executor_2d == null:
+			var exec_script := load("res://Scripts/TraversalExecutor2D.gd") as GDScript
+			if exec_script:
+				_traversal_executor_2d = exec_script.new()
+
 		# Only change the tactical node (and recompute path) when the evaluator
 		# actually selected a DIFFERENT node after beating the hysteresis threshold.
 		if new_node_id != _target_attack_node_id and new_node_id != -1 and _tactical_graph_2d != null:
@@ -742,6 +761,13 @@ func _tick_2d(delta: float) -> void:
 			var path_res = _tactical_graph_2d.call("get_smoothed_path_positions", self_pos, _target_attack_node_id, space)
 			if path_res is Array and not path_res.is_empty():
 				_tactical_path_2d = path_res
+
+			var edges_res = _tactical_graph_2d.call("get_traversal_edges", self_pos, _target_attack_node_id, space)
+			if edges_res is Array and not edges_res.is_empty():
+				_traversal_edges_2d = edges_res
+				if _traversal_executor_2d != null:
+					_traversal_executor_2d.call("start_edge", _traversal_edges_2d[0], self_pos)
+
 			if (_tactical_path_2d.size() <= 1) and not has_los:
 				var enemy_node: int = _tactical_graph_2d.call("get_nearest_node_id", enemy_pos)
 				if enemy_node != -1 and enemy_node != _target_attack_node_id:

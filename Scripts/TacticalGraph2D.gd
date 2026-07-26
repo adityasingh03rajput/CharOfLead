@@ -188,3 +188,63 @@ func get_smoothed_path_positions(start_pos: Vector2, target_node_id: int, space_
 
 func get_all_node_ids() -> Array:
 	return _nodes.keys()
+
+
+## Converts a smoothed path into a sequence of structured Traversal Edge Dictionaries
+## for TraversalExecutor2D.
+func get_traversal_edges(start_pos: Vector2, target_node_id: int, space_state: PhysicsDirectSpaceState2D = null) -> Array[Dictionary]:
+	var smoothed_positions := get_smoothed_path_positions(start_pos, target_node_id, space_state)
+	if smoothed_positions.size() < 2:
+		return []
+
+	var edges: Array[Dictionary] = []
+	for i in range(smoothed_positions.size() - 1):
+		var p1 := smoothed_positions[i]
+		var p2 := smoothed_positions[i + 1]
+
+		var id1 := get_nearest_node_id(p1)
+		var id2 := get_nearest_node_id(p2)
+		var s1 := get_node_surface(id1)
+		var s2 := get_node_surface(id2)
+
+		var dx := p2.x - p1.x
+		var dy := p2.y - p1.y
+
+		var type: int = TraversalExecutor2D.TraversalType.WALK
+		var dir: int  = TraversalExecutor2D.Direction.NONE
+
+		if dx < -5.0:
+			dir = TraversalExecutor2D.Direction.LEFT
+		elif dx > 5.0:
+			dir = TraversalExecutor2D.Direction.RIGHT
+		elif dy < -5.0:
+			dir = TraversalExecutor2D.Direction.UP
+		elif dy > 5.0:
+			dir = TraversalExecutor2D.Direction.DOWN
+
+		if s1 == SurfaceType.WALL_LEFT or s1 == SurfaceType.WALL_RIGHT:
+			if absf(dx) > 16.0 or dy < -30.0:
+				type = TraversalExecutor2D.TraversalType.CORNER_LEAP
+			elif absf(dx) > 80.0:
+				type = TraversalExecutor2D.TraversalType.WALL_JUMP
+			else:
+				type = TraversalExecutor2D.TraversalType.CLIMB
+		elif s1 == SurfaceType.CEILING:
+			if dy > 20.0:
+				type = TraversalExecutor2D.TraversalType.DROP
+			else:
+				type = TraversalExecutor2D.TraversalType.CEILING_SLIDE
+		elif s1 == SurfaceType.FLOOR and (s2 == SurfaceType.WALL_LEFT or s2 == SurfaceType.WALL_RIGHT) and dy < -30.0:
+			type = TraversalExecutor2D.TraversalType.CORNER_LEAP
+		else:
+			type = TraversalExecutor2D.TraversalType.WALK
+
+		edges.append({
+			"pos_from": p1,
+			"pos_to": p2,
+			"type": type,
+			"dir": dir,
+			"timeout": 1.2
+		})
+
+	return edges

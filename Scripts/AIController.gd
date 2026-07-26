@@ -295,11 +295,12 @@ func _segment_intersects_rect(p1: Vector2, p2: Vector2, rect: Rect2) -> bool:
 	return false
 
 
-# ── Tactical Graph Pathfinding (State B 2D) ──────────────────────────────────
 var _tactical_graph_2d: RefCounted = null
 var _tactical_path_2d: Array[Vector2] = []
 var _target_attack_node_id: int = -1
 var _replan_timer_2d: float = 0.0
+var _last_target_enemy_pos: Vector2 = Vector2.ZERO
+var _last_los_state: bool = false
 
 func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	if _is_path_clear_2d(self_pos, target_pos):
@@ -652,21 +653,24 @@ func _tick_2d(delta: float) -> void:
 		"health_ratio": _health_ratio(ai_player_id)
 	}
 
-	if _replan_timer_2d <= 0.0 or _tactical_path_2d.is_empty():
-		_replan_timer_2d = 0.18 # 180ms decision frequency
+	var should_replan := _tactical_path_2d.is_empty() or (_replan_timer_2d <= 0.0 and (enemy_pos.distance_to(_last_target_enemy_pos) > 90.0 or has_los != _last_los_state))
+	if should_replan:
+		_replan_timer_2d = 0.25 # 250ms stable path commitment window
+		_last_target_enemy_pos = enemy_pos
+		_last_los_state = has_los
 		var active_goal := GOAPPlanner2D.evaluate_best_goal(beliefs)
 		_target_attack_node_id = TacticalEvaluator2D.select_best_attack_node(
 			_tactical_graph_2d, self_pos, enemy_pos, space,
 			_body_2d.get_rid(), _enemy_2d.get_rid()
 		)
 		if _target_attack_node_id != -1 and _tactical_graph_2d != null:
-			var path_res = _tactical_graph_2d.call("get_path_positions", self_pos, _target_attack_node_id)
-			if path_res is Array:
+			var path_res = _tactical_graph_2d.call("get_smoothed_path_positions", self_pos, _target_attack_node_id, space)
+			if path_res is Array and not path_res.is_empty():
 				_tactical_path_2d = path_res
 			if (_tactical_path_2d.size() <= 1) and not has_los:
 				var enemy_node: int = _tactical_graph_2d.call("get_nearest_node_id", enemy_pos)
 				if enemy_node != -1 and enemy_node != _target_attack_node_id:
-					var enemy_path = _tactical_graph_2d.call("get_path_positions", self_pos, enemy_node)
+					var enemy_path = _tactical_graph_2d.call("get_smoothed_path_positions", self_pos, enemy_node, space)
 					if enemy_path is Array and not enemy_path.is_empty():
 						_tactical_path_2d = enemy_path
 

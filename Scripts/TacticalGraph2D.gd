@@ -41,36 +41,41 @@ func build_graph(space_state: PhysicsDirectSpaceState2D = null) -> void:
 
 	var node_list: Array = []
 
+	var node_list: Array = []
+
 	# --- Top Shelf ---
-	for x in range(-320, 30, 40):
+	for x in range(-320, 30, 25):
 		node_list.append({"pos": Vector2(x, -120.0), "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
 
-	# --- Central Vertical Wall (Left Face) ---
-	for y in range(-110, 110, 35):
-		node_list.append({"pos": Vector2(-25.0, y), "surf": SurfaceType.WALL_LEFT, "norm": Vector2.RIGHT})
+	# --- Central Vertical Wall (Left & Right Faces + Top/Bottom Corners) ---
+	for y in range(-120, 125, 25):
+		node_list.append({"pos": Vector2(-20.0, y), "surf": SurfaceType.WALL_LEFT, "norm": Vector2.RIGHT})
+		node_list.append({"pos": Vector2(20.0, y), "surf": SurfaceType.WALL_RIGHT, "norm": Vector2.LEFT})
 
-	# --- Central Vertical Wall (Right Face) ---
-	for y in range(-110, 110, 35):
-		node_list.append({"pos": Vector2(25.0, y), "surf": SurfaceType.WALL_RIGHT, "norm": Vector2.LEFT})
+	# --- Corner Waypoints (Tactical Vault Points around Wall Edges) ---
+	node_list.append({"pos": Vector2(-320.0, -140.0), "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
+	node_list.append({"pos": Vector2(0.0, -145.0),    "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
+	node_list.append({"pos": Vector2(0.0, 140.0),     "surf": SurfaceType.FLOOR, "norm": Vector2.DOWN})
+	node_list.append({"pos": Vector2(320.0, 140.0),   "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
 
 	# --- Lower Shelf ---
-	for x in range(30, 330, 40):
+	for x in range(-25, 330, 25):
 		node_list.append({"pos": Vector2(x, 120.0), "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
 
 	# --- Arena Bottom Floor ---
-	for x in range(-340, 350, 50):
+	for x in range(-340, 350, 35):
 		node_list.append({"pos": Vector2(x, 220.0), "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
 
 	# --- Arena Ceiling / Roof ---
-	for x in range(-340, 350, 50):
+	for x in range(-340, 350, 35):
 		node_list.append({"pos": Vector2(x, -220.0), "surf": SurfaceType.CEILING, "norm": Vector2.DOWN})
 
 	# --- Outer Left Wall ---
-	for y in range(-210, 220, 50):
+	for y in range(-210, 220, 35):
 		node_list.append({"pos": Vector2(-340.0, y), "surf": SurfaceType.WALL_LEFT, "norm": Vector2.RIGHT})
 
 	# --- Outer Right Wall ---
-	for y in range(-210, 220, 50):
+	for y in range(-210, 220, 35):
 		node_list.append({"pos": Vector2(340.0, y), "surf": SurfaceType.WALL_RIGHT, "norm": Vector2.LEFT})
 
 	# Add nodes to AStar2D graph
@@ -89,17 +94,17 @@ func build_graph(space_state: PhysicsDirectSpaceState2D = null) -> void:
 			var s2: int = _nodes[j]["surf"]
 			var dist := p1.distance_to(p2)
 
-			if dist > 150.0:
+			if dist > 160.0:
 				continue # Nodes too far apart for direct single-step transition
 
 			if _is_segment_clear(p1, p2, space_state):
 				var cost_mult := 1.0
 				if s1 == SurfaceType.WALL_LEFT or s1 == SurfaceType.WALL_RIGHT or s2 == SurfaceType.WALL_LEFT or s2 == SurfaceType.WALL_RIGHT:
-					cost_mult = 1.35 # Climbing cost
+					cost_mult = 1.25 # Climbing cost
 				elif s1 == SurfaceType.CEILING or s2 == SurfaceType.CEILING:
-					cost_mult = 1.50 # Ceiling traverse cost
+					cost_mult = 1.40 # Ceiling traverse cost
 				elif p1.y != p2.y and (s1 == SurfaceType.FLOOR or s2 == SurfaceType.FLOOR):
-					cost_mult = 1.20 # Jump/Drop transition cost
+					cost_mult = 1.15 # Jump/Drop transition cost
 
 				_astar.connect_points(i, j, true)
 				_astar.set_point_weight_scale(i, cost_mult)
@@ -160,6 +165,27 @@ func get_path_positions(start_pos: Vector2, target_node_id: int) -> Array[Vector
 	for p in point_path:
 		result.append(p)
 	return result
+
+
+## String-pulling path smoothing: removes redundant intermediate waypoints
+## if a direct line-of-sight segment exists between non-adjacent nodes.
+func get_smoothed_path_positions(start_pos: Vector2, target_node_id: int, space_state: PhysicsDirectSpaceState2D = null) -> Array[Vector2]:
+	var raw_path := get_path_positions(start_pos, target_node_id)
+	if raw_path.size() <= 2:
+		return raw_path
+
+	var smoothed: Array[Vector2] = [raw_path[0]]
+	var curr := 0
+	while curr < raw_path.size() - 1:
+		var furthest := curr + 1
+		for check in range(raw_path.size() - 1, curr + 1, -1):
+			if _is_segment_clear(raw_path[curr], raw_path[check], space_state):
+				furthest = check
+				break
+		smoothed.append(raw_path[furthest])
+		curr = furthest
+
+	return smoothed
 
 
 func get_all_node_ids() -> Array:

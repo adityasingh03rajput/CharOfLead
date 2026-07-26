@@ -291,7 +291,7 @@ func _segment_intersects_rect(p1: Vector2, p2: Vector2, rect: Rect2) -> bool:
 
 
 # ── Tactical Graph Pathfinding (State B 2D) ──────────────────────────────────
-var _tactical_graph_2d: TacticalGraph2D = TacticalGraph2D.new()
+var _tactical_graph_2d: RefCounted = null
 var _tactical_path_2d: Array[Vector2] = []
 var _target_attack_node_id: int = -1
 var _replan_timer_2d: float = 0.0
@@ -613,6 +613,12 @@ func _tick_2d(delta: float) -> void:
 	if _body_2d.get("_is_dead") or _enemy_2d.get("_is_dead"):
 		return
 
+	if _tactical_graph_2d == null:
+		var graph_script := load("res://Scripts/TacticalGraph2D.gd") as GDScript
+		if graph_script:
+			_tactical_graph_2d = graph_script.new()
+			_tactical_graph_2d.build_graph(_body_2d.get_world_2d().direct_space_state)
+
 	_replan_timer_2d -= delta
 	var self_pos: Vector2  = _body_2d.global_position
 	var enemy_pos: Vector2 = _enemy_2d.global_position
@@ -640,8 +646,10 @@ func _tick_2d(delta: float) -> void:
 			_tactical_graph_2d, self_pos, enemy_pos, space,
 			_body_2d.get_rid(), _enemy_2d.get_rid()
 		)
-		if _target_attack_node_id != -1:
-			_tactical_path_2d = _tactical_graph_2d.get_path_positions(self_pos, _target_attack_node_id)
+		if _target_attack_node_id != -1 and _tactical_graph_2d != null:
+			var path_res = _tactical_graph_2d.call("get_path_positions", self_pos, _target_attack_node_id)
+			if path_res is Array:
+				_tactical_path_2d = path_res
 
 	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else (ai_player_id == 2)
 

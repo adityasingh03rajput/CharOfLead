@@ -722,10 +722,10 @@ func _tick_2d(delta: float) -> void:
 	if not _tactical_path_2d.is_empty():
 		dist_to_wp = self_pos.distance_to(_tactical_path_2d[0])
 		wp_idx = wp_idx  # index = 0 since we always pop front
-	var goal_names := ["ELIMINATE", "GAIN_LOS", "FLANK", "UNSTICK", "TARGET_DEAD"]
-	var goal_str := goal_names[_active_goal_2d] if _active_goal_2d >= 0 and _active_goal_2d < goal_names.size() else "?"
-	var state_names := ["SEEK", "STRAFE", "EVADE", "BODY_HOP", "GRAPPLE"]
-	var state_str := state_names[_state] if _state >= 0 and _state < state_names.size() else "?"
+	var goal_names: Array[String] = ["ELIMINATE", "GAIN_LOS", "FLANK", "UNSTICK", "TARGET_DEAD"]
+	var goal_str: String = goal_names[_active_goal_2d] if _active_goal_2d >= 0 and _active_goal_2d < goal_names.size() else "?"
+	var state_names: Array[String] = ["SEEK", "STRAFE", "EVADE", "BODY_HOP", "GRAPPLE"]
+	var state_str: String = state_names[_state] if _state >= 0 and _state < state_names.size() else "?"
 	if should_replan:
 		print("[%s] Goal:%s | State:%s | Node:%d | Path:%d/%d | LOS:%s | DWP:%.0f | DE:%.0f | Age:%.2fs" % [
 			ai_tag, goal_str, state_str, _target_attack_node_id,

@@ -289,7 +289,7 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 		if is_instance_valid(_body_2d):
 			if _body_2d.is_on_wall():
 				_virt_jump = true
-			elif waypoint.y < self_pos.y - 20.0 and _body_2d.is_on_floor():
+			elif absf(waypoint.x - self_pos.x) < 35.0 and waypoint.y < self_pos.y - 30.0 and _body_2d.is_on_floor():
 				_virt_jump = true
 		return way_dir
 

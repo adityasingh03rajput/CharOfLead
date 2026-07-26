@@ -360,6 +360,9 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 			_traversal_edges_2d.pop_front()
 			if not _traversal_edges_2d.is_empty():
 				_traversal_executor_2d.call("start_edge", _traversal_edges_2d[0], self_pos)
+				exec_res = _traversal_executor_2d.call("tick", 0.0, _body_2d, self_pos)
+			else:
+				return Vector2.ZERO
 
 		var move_vec: Vector2 = exec_res.get("move", Vector2.ZERO)
 		if move_vec.length_squared() > 0.01:

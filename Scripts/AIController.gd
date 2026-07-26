@@ -252,14 +252,14 @@ func _get_nav_dir(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	_astar.remove_point(id_t)
 	return dir
 
-const MAZE_WALL_BOXES_2D = [
+const MAZE_WALL_BOXES_2D: Array[Rect2] = [
 	Rect2(Vector2(-310.0, -115.0), Vector2(335.0, 30.0)), # Top Shelf Wall Box
 	Rect2(Vector2(-15.0, -120.0), Vector2(30.0, 240.0)),  # Central Vertical Wall Box
 	Rect2(Vector2(-25.0, 85.0), Vector2(335.0, 30.0))     # Lower Shelf Wall Box
 ]
 
 func _is_path_clear_2d(from_2d: Vector2, to_2d: Vector2) -> bool:
-	for box in MAZE_WALL_BOXES_2D:
+	for box: Rect2 in MAZE_WALL_BOXES_2D:
 		if _segment_intersects_rect(from_2d, to_2d, box):
 			return false
 
@@ -277,10 +277,10 @@ func _is_path_clear_2d(from_2d: Vector2, to_2d: Vector2) -> bool:
 	return true
 
 func _segment_intersects_rect(p1: Vector2, p2: Vector2, rect: Rect2) -> bool:
-	var r_top    := rect.position
-	var r_bottom := rect.position + rect.size
-	var r_right  := Vector2(r_bottom.x, r_top.y)
-	var r_left   := Vector2(r_top.x, r_bottom.y)
+	var r_top: Vector2    = rect.position
+	var r_bottom: Vector2 = rect.position + rect.size
+	var r_right: Vector2  = Vector2(r_bottom.x, r_top.y)
+	var r_left: Vector2   = Vector2(r_top.x, r_bottom.y)
 
 	if Geometry2D.segment_intersects_segment(p1, p2, r_top, r_right) != null: return true
 	if Geometry2D.segment_intersects_segment(p1, p2, r_right, r_bottom) != null: return true

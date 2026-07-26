@@ -9,7 +9,7 @@ extends RefCounted
 ##   -  1.2 * dist : Path travel distance penalty from AI's current position
 ##   - 30.0 : High risk / floating / ceiling positions unless necessary
 
-const WALL_BOXES = [
+const WALL_BOXES: Array[Rect2] = [
 	Rect2(Vector2(-310.0, -115.0), Vector2(335.0, 30.0)), # Top Shelf Wall Box
 	Rect2(Vector2(-15.0, -120.0), Vector2(30.0, 240.0)),  # Central Vertical Wall Box
 	Rect2(Vector2(-25.0, 85.0), Vector2(335.0, 30.0))     # Lower Shelf Wall Box
@@ -87,11 +87,11 @@ static func _check_line_of_sight(
 		exclude_enemy: RID
 ) -> bool:
 	# Geometric wall box check
-	for box in WALL_BOXES:
-		var r_top    := box.position
-		var r_bottom := box.position + box.size
-		var r_right  := Vector2(r_bottom.x, r_top.y)
-		var r_left   := Vector2(r_top.x, r_bottom.y)
+	for box: Rect2 in WALL_BOXES:
+		var r_top: Vector2    = box.position
+		var r_bottom: Vector2 = box.position + box.size
+		var r_right: Vector2  = Vector2(r_bottom.x, r_top.y)
+		var r_left: Vector2   = Vector2(r_top.x, r_bottom.y)
 
 		if Geometry2D.segment_intersects_segment(from_pos, to_pos, r_top, r_right) != null: return false
 		if Geometry2D.segment_intersects_segment(from_pos, to_pos, r_right, r_bottom) != null: return false

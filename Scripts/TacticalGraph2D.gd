@@ -105,18 +105,18 @@ func build_graph(space_state: PhysicsDirectSpaceState2D = null) -> void:
 				_astar.set_point_weight_scale(i, cost_mult)
 
 
-const WALL_BOXES = [
+const WALL_BOXES: Array[Rect2] = [
 	Rect2(Vector2(-310.0, -115.0), Vector2(335.0, 30.0)), # Top Shelf Wall Box
 	Rect2(Vector2(-15.0, -120.0), Vector2(30.0, 240.0)),  # Central Vertical Wall Box
 	Rect2(Vector2(-25.0, 85.0), Vector2(335.0, 30.0))     # Lower Shelf Wall Box
 ]
 
 func _is_segment_clear(p1: Vector2, p2: Vector2, space_state: PhysicsDirectSpaceState2D) -> bool:
-	for box in WALL_BOXES:
-		var r_top    := box.position
-		var r_bottom := box.position + box.size
-		var r_right  := Vector2(r_bottom.x, r_top.y)
-		var r_left   := Vector2(r_top.x, r_bottom.y)
+	for box: Rect2 in WALL_BOXES:
+		var r_top: Vector2    = box.position
+		var r_bottom: Vector2 = box.position + box.size
+		var r_right: Vector2  = Vector2(r_bottom.x, r_top.y)
+		var r_left: Vector2   = Vector2(r_top.x, r_bottom.y)
 
 		if Geometry2D.segment_intersects_segment(p1, p2, r_top, r_right) != null: return false
 		if Geometry2D.segment_intersects_segment(p1, p2, r_right, r_bottom) != null: return false

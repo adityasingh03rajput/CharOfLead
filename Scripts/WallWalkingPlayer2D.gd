@@ -26,6 +26,7 @@ var _recoil_vel := Vector2.ZERO
 var _is_dead := false
 var _has_won := false
 var _is_shooting := false
+var _log_timer_2d: float = 0.0
 
 # Realistic Movement States
 enum MoveState { FLOOR, WALL_LEFT, WALL_RIGHT, CEILING, AIR, GRAPPLE }
@@ -671,6 +672,15 @@ func _physics_process(delta: float) -> void:
 	if steering_reticle:
 		input_x = 0.0
 		input_y = 0.0
+
+	_log_timer_2d += delta
+	if _log_timer_2d >= 0.25:
+		_log_timer_2d = 0.0
+		var tag := "RED 2D PLAYER" if player_id == 1 else "BLUE 2D PLAYER"
+		var is_zip := _grapple_state == GrappleState.ZIPPING
+		print("[%s] Pos: %s | State: %d | Input: (%s, %s) | Vel: %s | Zipping: %s" % [
+			tag, global_position, _current_state, input_x, input_y, velocity, is_zip
+		])
 
 	var current_speed: float = speed * (1.5 if is_running else 1.0)
 	if is_crouching:

@@ -328,7 +328,8 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 					way_dir.x = 0.0
 			elif absf(waypoint.x - self_pos.x) < 35.0 and waypoint.y < self_pos.y - 30.0 and _body_2d.is_on_floor():
 				_virt_jump = true
-		print("[BLUE 2D AI NAV] Self: %s | Waypoint: %s | WayDir: %s | Jump: %s" % [self_pos, waypoint, way_dir, _virt_jump])
+		var nav_tag := "RED 2D AI NAV" if ai_player_id == 1 else "BLUE 2D AI NAV"
+		print("[%s] Self: %s | Waypoint: %s | WayDir: %s | Jump: %s" % [nav_tag, self_pos, waypoint, way_dir, _virt_jump])
 		return way_dir
 
 	var shelf_route_x := _find_best_2d_shelf_route(self_pos, target_pos)
@@ -669,8 +670,9 @@ func _tick_2d(delta: float) -> void:
 					if enemy_path is Array and not enemy_path.is_empty():
 						_tactical_path_2d = enemy_path
 
-		print("[BLUE 2D AI] Goal: %s | Self: %s | TargetNode: %d | PathSize: %d | LOS: %s" % [
-			active_goal, self_pos, _target_attack_node_id, _tactical_path_2d.size(), has_los
+		var ai_tag := "RED 2D AI" if ai_player_id == 1 else "BLUE 2D AI"
+		print("[%s] Goal: %s | Self: %s | TargetNode: %d | PathSize: %d | LOS: %s" % [
+			ai_tag, active_goal, self_pos, _target_attack_node_id, _tactical_path_2d.size(), has_los
 		])
 
 	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else (ai_player_id == 2)

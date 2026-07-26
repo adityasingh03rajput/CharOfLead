@@ -34,45 +34,56 @@ static func select_best_attack_node(
 	var best_score: float = -999999.0
 
 	for node_id in node_ids:
+		# 0. Reachability Filter: Must have valid A* path from self_pos to candidate node
+		var path_res = graph.call("get_path_positions", self_pos, node_id)
+		if not (path_res is Array) or path_res.is_empty():
+			continue # Skip unreachable / disconnected nodes
+
 		var npos: Vector2 = graph.call("get_node_pos", node_id)
 		var surf: int = graph.call("get_node_surface", node_id)
 		var score: float = 0.0
 
-		# 1. Line-of-Sight Evaluation (Physics raycast + Geometric box test)
+		# Calculate total path travel distance along waypoints
+		var travel_dist: float = 0.0
+		var curr_p: Vector2 = self_pos
+		for wp: Vector2 in path_res:
+			travel_dist += curr_p.distance_to(wp)
+			curr_p = wp
+
+		# 1. Line-of-Sight Evaluation to Enemy
 		var has_los := _check_line_of_sight(npos, enemy_pos, space_state, exclude_self_body, exclude_enemy_body)
 		if has_los:
-			score += 150.0
+			score += 200.0 # High priority for positions with unblocked line of sight
 		else:
-			score -= 80.0 # Heavy penalty if node has no sightline to enemy
+			score -= 60.0
 
-		# 2. Distance Penalty (Prefer closer nodes to avoid unnecessary long treks)
-		var travel_dist := self_pos.distance_to(npos)
-		score -= travel_dist * 0.25
+		# 2. Path Travel Penalty (Prefer shorter, direct travel routes)
+		score -= travel_dist * 0.20
 
-		# 3. Target Range Optimization (Ideal combat standoff 180px - 400px)
+		# 3. Target Range Standoff (Ideal combat standoff 180px - 400px)
 		var enemy_dist := npos.distance_to(enemy_pos)
-		if enemy_dist >= 150.0 and enemy_dist <= 420.0:
-			score += 40.0
+		if enemy_dist >= 160.0 and enemy_dist <= 380.0:
+			score += 50.0
 		elif enemy_dist < 100.0:
-			score -= 30.0 # Too close / vulnerable to counter
+			score -= 30.0 # Avoid getting trapped in point-blank melee range
 
-		# 4. Height Advantage
-		if npos.y < enemy_pos.y - 30.0:
-			score += 35.0 # Above enemy
+		# 4. Height Advantage (High ground bonus)
+		if npos.y < enemy_pos.y - 25.0:
+			score += 45.0
 
-		# 5. Surface & Stability Preference (Prefer Floor and Wall over Ceiling)
+		# 5. Surface & Stability Preference (Floor > Wall > Ceiling)
 		if surf == 0: # FLOOR
-			score += 20.0
-		elif surf == 1 or surf == 2: # WALL_LEFT / WALL_RIGHT
+			score += 25.0
+		elif surf == 1 or surf == 2: # WALL
 			score += 15.0
 		elif surf == 3: # CEILING
-			score -= 10.0
+			score -= 15.0
 
 		if score > best_score:
 			best_score = score
 			best_node_id = node_id
 
-	# Fallback if all nodes scored low
+	# Fallback if no candidate was reachable
 	if best_node_id == -1:
 		best_node_id = graph.call("get_nearest_node_id", enemy_pos)
 

@@ -100,7 +100,12 @@ func setup(body3d: CharacterBody3D, body2d: CharacterBody2D,
 	_state    = AIState.SEEK
 	_init_nav()
 	if is_instance_valid(_body_2d):
-		_tactical_graph_2d.build_graph(_body_2d.get_world_2d().direct_space_state)
+		if _tactical_graph_2d == null:
+			var graph_script := load("res://Scripts/TacticalGraph2D.gd") as GDScript
+			if graph_script:
+				_tactical_graph_2d = graph_script.new()
+		if _tactical_graph_2d != null:
+			_tactical_graph_2d.call("build_graph", _body_2d.get_world_2d().direct_space_state)
 	if is_instance_valid(GameManager) and not GameManager.health_changed.is_connected(_on_health_changed):
 		GameManager.health_changed.connect(_on_health_changed)
 	if is_instance_valid(GameManager):

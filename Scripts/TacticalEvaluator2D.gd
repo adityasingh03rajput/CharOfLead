@@ -60,6 +60,10 @@ static func select_best_attack_node(
 		var has_los := _check_line_of_sight(npos, enemy_pos, space_state, exclude_self_body, exclude_enemy_body)
 		var enemy_dist := npos.distance_to(enemy_pos)
 
+		# Occupancy / Anti-Stacking: Don't choose nodes right on top of the enemy
+		if enemy_dist < 70.0:
+			score -= 150.0
+
 		match goal_type:
 			0: # ELIMINATE — want LOS, ideal standoff, height advantage
 				if has_los:

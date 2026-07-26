@@ -905,7 +905,15 @@ func _ai_2d_strafe(to_enemy: Vector2, dist: float, enemy_pos: Vector2) -> void:
 	var dist_err   := dist - ideal_dist
 	_virt_move.x   = _strafe_dir
 
-	if dist_err > 120.0:
+	# Close contact anti-stacking vault
+	if dist < 65.0:
+		_virt_jump = true
+		var self_pos: Vector2 = _body_2d.global_position if is_instance_valid(_body_2d) else Vector2.ZERO
+		if absf(self_pos.x) > 340.0:
+			_virt_move.x = -signf(self_pos.x) # push toward arena center off wall
+		else:
+			_virt_move.x = -signf(to_enemy.x)
+	elif dist_err > 120.0:
 		_virt_move.x = sign(to_enemy.x)
 	elif dist_err < -100.0:
 		_virt_move.x = -sign(to_enemy.x)

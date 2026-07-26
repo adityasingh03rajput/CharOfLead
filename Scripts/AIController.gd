@@ -348,13 +348,29 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 		var way_dir := (waypoint - self_pos).normalized()
 		if is_instance_valid(_body_2d):
 			if _body_2d.is_on_wall():
-				# If waypoint is on a different surface/X offset, leap off wall into open air
-				if absf(waypoint.x - self_pos.x) > 40.0:
-					_virt_jump = true
+				var on_corner_ceiling := _body_2d.is_on_ceiling()
+				var is_stuck := _stuck_2d_timer > 0.1 or _unstick_flank_timer > 0.0
+				var x_offset := absf(waypoint.x - self_pos.x)
+
+				# Raycast overhead to detect inside corners / shelf ceilings above
+				var space := _body_2d.get_world_2d().direct_space_state
+				var overhead_blocked := false
+				if space and waypoint.y < self_pos.y:
+					var ray_q := PhysicsRayQueryParameters2D.create(self_pos, self_pos + Vector2(0, -35.0))
+					ray_q.collision_mask = 1
+					ray_q.exclude = [_body_2d.get_rid()]
+					overhead_blocked = not space.intersect_ray(ray_q).is_empty()
+
+				# If waypoint is horizontally offset (> 16px), or we're at a ceiling corner, overhead is blocked, or stuck:
+				if x_offset > 16.0 or on_corner_ceiling or overhead_blocked or is_stuck:
+					_virt_jump = true # Leap off wall into open air around corner!
 				else:
 					# Climb along wall face toward waypoint's Y coordinate
 					way_dir.y = signf(waypoint.y - self_pos.y)
 					way_dir.x = 0.0
+			elif _body_2d.is_on_ceiling():
+				if waypoint.y > self_pos.y + 20.0 or _stuck_2d_timer > 0.1:
+					_virt_jump = true # Drop off ceiling into open air!
 			elif absf(waypoint.x - self_pos.x) < 35.0 and waypoint.y < self_pos.y - 30.0 and _body_2d.is_on_floor():
 				_virt_jump = true
 		var nav_tag := "RED 2D AI NAV" if ai_player_id == 1 else "BLUE 2D AI NAV"
@@ -910,6 +926,8 @@ func _apply_surface_frame_2d(move: Vector2, to_enemy: Vector2) -> Vector2:
 	# On a wall the body ignores move.x entirely (it is overwritten by the
 	# wall-stick velocity), so horizontal intent has to become vertical climb.
 	if _is_wall_mounted_2d():
+		if absf(move.y) > 0.05:
+			return move
 		var climb: float = signf(to_enemy.y)
 		if climb == 0.0:
 			climb = -1.0

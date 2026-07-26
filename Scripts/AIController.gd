@@ -324,7 +324,20 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	# If direct line-of-sight is blocked, use tactical graph pathfinding
 	if not _tactical_path_2d.is_empty():
 		var waypoint: Vector2 = _tactical_path_2d[0]
-		if self_pos.distance_to(waypoint) < 40.0:
+
+		# ── Waypoint arrival: axis-separated thresholds ──────────────────────
+		# On a wall the AI can never close the full 2D distance because gravity
+		# keeps pulling it away from the waypoint's Y. Check each axis separately:
+		# • If X is aligned (within 30px) and Y is within 55px → pop on wall.
+		# • On floor/air use a flat 40px radius as before.
+		var on_wall := is_instance_valid(_body_2d) and _body_2d.is_on_wall()
+		var arrived := false
+		if on_wall:
+			arrived = absf(waypoint.x - self_pos.x) < 30.0 and absf(waypoint.y - self_pos.y) < 55.0
+		else:
+			arrived = self_pos.distance_to(waypoint) < 40.0
+
+		if arrived:
 			_tactical_path_2d.pop_front()
 			if not _tactical_path_2d.is_empty():
 				waypoint = _tactical_path_2d[0]

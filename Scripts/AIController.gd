@@ -327,6 +327,13 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 		return (target_pos - self_pos).normalized()
 
 	# ── TraversalExecutor2D: Data-driven event-based macro execution ───────
+	if _target_attack_node_id != -1 and _tactical_graph_2d != null:
+		var target_node_pos: Vector2 = _tactical_graph_2d.call("get_node_pos", _target_attack_node_id)
+		if self_pos.distance_to(target_node_pos) < 35.0:
+			_traversal_edges_2d.clear()
+			_tactical_path_2d.clear()
+			return Vector2.ZERO
+
 	if _traversal_edges_2d.is_empty() and _tactical_graph_2d != null and _target_attack_node_id != -1:
 		var space := _body_2d.get_world_2d().direct_space_state
 		var edges_res = _tactical_graph_2d.call("get_traversal_edges", self_pos, _target_attack_node_id, space)
@@ -818,12 +825,31 @@ func _tick_2d(delta: float) -> void:
 
 
 
+	# ── Traversal Execution Ownership ─────────────────────────────────────────
+	# If TraversalExecutor is actively running a macro, it has EXCLUSIVE ownership
+	# over virtual inputs (move, jump). No other state machine or strafe loop
+	# may overwrite the macro's input execution.
+	if _traversal_executor_2d != null and _traversal_executor_2d.call("is_active"):
+		var macro_dir := _get_nav_dir_2d(self_pos, enemy_pos)
+		_virt_move = macro_dir
+		_virt_mouse_world = _predict_enemy_2d(enemy_pos)
+		return # EXCLUSIVE LOCKOUT — Early return while macro runs!
+
 	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else (ai_player_id == 2)
 
+	# ── Path: 0 Arrival Stance ─────────────────────────────────────────────────
+	# If navigation path is complete (Path: 0) and no macro is active:
+	# • If we have LOS + weapons → combat strafe
+	# • If no LOS (holding cover node) → stand ground, zero input oscillation!
+	if _tactical_path_2d.is_empty() and _traversal_edges_2d.is_empty():
+		_virt_mouse_world = _predict_enemy_2d(enemy_pos)
+		if is_ai_armed and has_los:
+			_ai_2d_strafe(to_enemy, dist, enemy_pos)
+		else:
+			_virt_move = Vector2.ZERO # Hold cover position cleanly
+		return
+
 	# ── State selection ───────────────────────────────────────────────────────
-	# IMMEDIATE override: if GOAP says attack and we have LOS, snap to STRAFE
-	# NOW without waiting for _decision_timer — this is the bug fix for Goal:0
-	# + still navigating instead of strafing.
 	if is_ai_armed and _active_goal_2d == GOAPPlanner2D.GoalType.ELIMINATE_TARGET and has_los:
 		_state = AIState.STRAFE
 		_tactical_path_2d.clear() # Drop nav path — switch to combat movement

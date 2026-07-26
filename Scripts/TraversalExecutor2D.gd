@@ -24,6 +24,10 @@ func start_edge(edge_info: Dictionary, self_pos: Vector2) -> void:
 	_start_pos = self_pos
 
 
+func is_active() -> bool:
+	return not _current_edge.is_empty()
+
+
 func tick(delta: float, body: CharacterBody2D, current_pos: Vector2) -> Dictionary:
 	var result := {
 		"move": Vector2.ZERO,
@@ -36,6 +40,7 @@ func tick(delta: float, body: CharacterBody2D, current_pos: Vector2) -> Dictiona
 	if _current_edge.is_empty() or not is_instance_valid(body):
 		result.completed = true
 		result.failed = false
+		_current_edge = {}
 		return result
 
 	_timer += delta
@@ -48,6 +53,7 @@ func tick(delta: float, body: CharacterBody2D, current_pos: Vector2) -> Dictiona
 	if _timer >= _timeout:
 		result.completed = true
 		result.failed = true
+		_current_edge = {}
 		return result
 
 	# Direction vector calculation
@@ -63,22 +69,28 @@ func tick(delta: float, body: CharacterBody2D, current_pos: Vector2) -> Dictiona
 	match ttype:
 		TraversalType.WALK:
 			var dx := target_pos.x - current_pos.x
-			result.move.x = signf(dx)
-			if absf(dx) < 25.0 or dist_to_target < 30.0:
+			if absf(dx) < 12.0 or dist_to_target < 25.0:
+				result.move.x = 0.0
 				result.completed = true
 				result.failed = false
-			elif _timer > 0.6 and body.get_real_velocity().length_squared() < 10.0:
+			else:
+				result.move.x = signf(dx)
+
+			if _timer > 0.6 and body.get_real_velocity().length_squared() < 10.0:
 				result.completed = true
 				result.failed = true
 
 		TraversalType.CLIMB:
 			var dy := target_pos.y - current_pos.y
-			result.move.y = signf(dy)
-			result.move.x = dir_vec.x
-			if absf(dy) < 35.0 or dist_to_target < 30.0:
+			if absf(dy) < 15.0 or dist_to_target < 25.0:
+				result.move = Vector2.ZERO
 				result.completed = true
 				result.failed = false
-			elif _timer > 0.6 and body.get_real_velocity().length_squared() < 10.0:
+			else:
+				result.move.y = signf(dy)
+				result.move.x = dir_vec.x
+
+			if _timer > 0.6 and body.get_real_velocity().length_squared() < 10.0:
 				result.completed = true
 				result.failed = true
 
@@ -139,5 +151,8 @@ func tick(delta: float, body: CharacterBody2D, current_pos: Vector2) -> Dictiona
 			if dist_to_target < 40.0:
 				result.completed = true
 				result.failed = false
+
+	if result.completed or result.failed:
+		_current_edge = {}
 
 	return result

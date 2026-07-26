@@ -315,6 +315,7 @@ var _last_target_enemy_pos: Vector2 = Vector2.ZERO
 var _last_los_state: bool = false
 var _path_age_2d: float = 0.0      # seconds since last path was computed
 var _active_goal_2d: int = -1      # last GOAP goal chosen
+var _current_node_score: float = -999999.0  # score of the incumbent tactical node
 
 func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	if _is_path_clear_2d(self_pos, target_pos):
@@ -693,18 +694,35 @@ func _tick_2d(delta: float) -> void:
 		"target_dead": _enemy_2d.get("_is_dead") == true
 	}
 
-	var should_replan := _tactical_path_2d.is_empty() or (_replan_timer_2d <= 0.0 and (enemy_pos.distance_to(_last_target_enemy_pos) > 90.0 or has_los != _last_los_state))
+	# Replan if: path empty, enemy moved >90px, or LOS flipped — but give path at
+	# least 0.60s of life so Age grows and we don't spam the evaluator.
+	var should_replan := _tactical_path_2d.is_empty() \
+		or (_replan_timer_2d <= 0.0 \
+			and (enemy_pos.distance_to(_last_target_enemy_pos) > 90.0 \
+				or has_los != _last_los_state))
 	if should_replan:
-		_replan_timer_2d = 0.25 # 250ms stable path commitment window
-		_path_age_2d = 0.0      # reset path age on fresh plan
+		_replan_timer_2d = 0.60   # 600ms commitment window (was 250ms)
 		_last_target_enemy_pos = enemy_pos
 		_last_los_state = has_los
 		_active_goal_2d = GOAPPlanner2D.evaluate_best_goal(beliefs)
-		_target_attack_node_id = TacticalEvaluator2D.select_best_attack_node(
+
+		# Goal-aware node selection with hysteresis
+		var eval_result: Dictionary = TacticalEvaluator2D.select_best_attack_node(
 			_tactical_graph_2d, self_pos, enemy_pos, space,
-			_body_2d.get_rid(), _enemy_2d.get_rid()
+			_body_2d.get_rid(), _enemy_2d.get_rid(),
+			_active_goal_2d,
+			_target_attack_node_id,
+			_current_node_score
 		)
-		if _target_attack_node_id != -1 and _tactical_graph_2d != null:
+		var new_node_id: int = eval_result.get("id", -1)
+		var new_score: float = eval_result.get("score", -999999.0)
+
+		# Only change the tactical node (and recompute path) when the evaluator
+		# actually selected a DIFFERENT node after beating the hysteresis threshold.
+		if new_node_id != _target_attack_node_id and new_node_id != -1 and _tactical_graph_2d != null:
+			_target_attack_node_id = new_node_id
+			_current_node_score    = new_score
+			_path_age_2d = 0.0    # path genuinely changed — reset age
 			var path_res = _tactical_graph_2d.call("get_smoothed_path_positions", self_pos, _target_attack_node_id, space)
 			if path_res is Array and not path_res.is_empty():
 				_tactical_path_2d = path_res
@@ -714,24 +732,34 @@ func _tick_2d(delta: float) -> void:
 					var enemy_path = _tactical_graph_2d.call("get_smoothed_path_positions", self_pos, enemy_node, space)
 					if enemy_path is Array and not enemy_path.is_empty():
 						_tactical_path_2d = enemy_path
+			# Log only when node actually changed
+			var ai_tag_ev := "RED 2D AI" if ai_player_id == 1 else "BLUE 2D AI"
+			var goal_names_ev: Array[String] = ["ELIMINATE", "GAIN_LOS", "FLANK", "UNSTICK", "TARGET_DEAD"]
+			var goal_str_ev: String = goal_names_ev[_active_goal_2d] if _active_goal_2d >= 0 and _active_goal_2d < goal_names_ev.size() else "?"
+			var state_names_ev: Array[String] = ["SEEK", "STRAFE", "EVADE", "BODY_HOP", "GRAPPLE"]
+			var state_str_ev: String = state_names_ev[_state] if _state >= 0 and _state < state_names_ev.size() else "?"
+			var dist_to_wp_ev: float = 0.0
+			if not _tactical_path_2d.is_empty():
+				dist_to_wp_ev = self_pos.distance_to(_tactical_path_2d[0])
+			print("[%s] ► Goal:%s | State:%s | Node:%d(score:%.0f) | Path:%d | LOS:%s | DWP:%.0f | DE:%.0f | Age:%.2fs" % [
+				ai_tag_ev, goal_str_ev, state_str_ev, _target_attack_node_id, _current_node_score,
+				_tactical_path_2d.size(), has_los, dist_to_wp_ev, dist, _path_age_2d
+			])
+		else:
+			# Same node kept — still log periodically so user sees Age growing
+			if int(_path_age_2d * 10.0) % 10 == 0 and _path_age_2d > 0.05:
+				var ai_tag_ev := "RED 2D AI" if ai_player_id == 1 else "BLUE 2D AI"
+				var goal_names_ev: Array[String] = ["ELIMINATE", "GAIN_LOS", "FLANK", "UNSTICK", "TARGET_DEAD"]
+				var goal_str_ev: String = goal_names_ev[_active_goal_2d] if _active_goal_2d >= 0 and _active_goal_2d < goal_names_ev.size() else "?"
+				var dist_to_wp_ev: float = 0.0
+				if not _tactical_path_2d.is_empty():
+					dist_to_wp_ev = self_pos.distance_to(_tactical_path_2d[0])
+				print("[%s] — Goal:%s | Node:%d(held) | Path:%d | LOS:%s | DWP:%.0f | DE:%.0f | Age:%.2fs" % [
+					ai_tag_ev, goal_str_ev, _target_attack_node_id,
+					_tactical_path_2d.size(), has_los, dist_to_wp_ev, dist, _path_age_2d
+				])
 
-	# ── Rich telemetry (every replan) ─────────────────────────────────────────
-	var ai_tag := "RED 2D AI" if ai_player_id == 1 else "BLUE 2D AI"
-	var wp_idx := 0
-	var dist_to_wp := 0.0
-	if not _tactical_path_2d.is_empty():
-		dist_to_wp = self_pos.distance_to(_tactical_path_2d[0])
-		wp_idx = wp_idx  # index = 0 since we always pop front
-	var goal_names: Array[String] = ["ELIMINATE", "GAIN_LOS", "FLANK", "UNSTICK", "TARGET_DEAD"]
-	var goal_str: String = goal_names[_active_goal_2d] if _active_goal_2d >= 0 and _active_goal_2d < goal_names.size() else "?"
-	var state_names: Array[String] = ["SEEK", "STRAFE", "EVADE", "BODY_HOP", "GRAPPLE"]
-	var state_str: String = state_names[_state] if _state >= 0 and _state < state_names.size() else "?"
-	if should_replan:
-		print("[%s] Goal:%s | State:%s | Node:%d | Path:%d/%d | LOS:%s | DWP:%.0f | DE:%.0f | Age:%.2fs" % [
-			ai_tag, goal_str, state_str, _target_attack_node_id,
-			_tactical_path_2d.size(), _tactical_path_2d.size(),
-			has_los, dist_to_wp, dist, _path_age_2d
-		])
+
 
 	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else (ai_player_id == 2)
 

@@ -41,8 +41,6 @@ func build_graph(space_state: PhysicsDirectSpaceState2D = null) -> void:
 
 	var node_list: Array = []
 
-	var node_list: Array = []
-
 	# --- Top Shelf ---
 	for x in range(-320, 30, 25):
 		node_list.append({"pos": Vector2(x, -120.0), "surf": SurfaceType.FLOOR, "norm": Vector2.UP})

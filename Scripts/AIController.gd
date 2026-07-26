@@ -594,8 +594,22 @@ func _tick_2d(delta: float) -> void:
 	var dist: float        = to_enemy.length()
 
 	var space := _body_2d.get_world_2d().direct_space_state
+	var has_los := _has_line_of_sight_2d()
+
+	# Build GOAP Belief State
+	var beliefs := {
+		"has_los": has_los,
+		"is_on_wall": _body_2d.is_on_wall(),
+		"is_on_ceiling": _body_2d.is_on_ceiling(),
+		"is_on_floor": _body_2d.is_on_floor(),
+		"stuck": _stuck_2d_timer > 0.25,
+		"target_dist": dist,
+		"health_ratio": _health_ratio(ai_player_id)
+	}
+
 	if _replan_timer_2d <= 0.0 or _tactical_path_2d.is_empty():
 		_replan_timer_2d = 0.18 # 180ms decision frequency
+		var active_goal := GOAPPlanner2D.evaluate_best_goal(beliefs)
 		_target_attack_node_id = TacticalEvaluator2D.select_best_attack_node(
 			_tactical_graph_2d, self_pos, enemy_pos, space,
 			_body_2d.get_rid(), _enemy_2d.get_rid()

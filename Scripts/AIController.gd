@@ -319,9 +319,16 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 		var way_dir := (waypoint - self_pos).normalized()
 		if is_instance_valid(_body_2d):
 			if _body_2d.is_on_wall():
-				_virt_jump = true
+				# If waypoint is on a different surface/X offset, leap off wall into open air
+				if absf(waypoint.x - self_pos.x) > 40.0:
+					_virt_jump = true
+				else:
+					# Climb along wall face toward waypoint's Y coordinate
+					way_dir.y = signf(waypoint.y - self_pos.y)
+					way_dir.x = 0.0
 			elif absf(waypoint.x - self_pos.x) < 35.0 and waypoint.y < self_pos.y - 30.0 and _body_2d.is_on_floor():
 				_virt_jump = true
+		print("[BLUE 2D AI NAV] Self: %s | Waypoint: %s | WayDir: %s | Jump: %s" % [self_pos, waypoint, way_dir, _virt_jump])
 		return way_dir
 
 	var shelf_route_x := _find_best_2d_shelf_route(self_pos, target_pos)
@@ -656,6 +663,10 @@ func _tick_2d(delta: float) -> void:
 			if path_res is Array:
 				_tactical_path_2d = path_res
 
+		print("[BLUE 2D AI] Goal: %s | Self: %s | TargetNode: %d | PathSize: %d | LOS: %s" % [
+			active_goal, self_pos, _target_attack_node_id, _tactical_path_2d.size(), has_los
+		])
+
 	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else (ai_player_id == 2)
 
 	# ── State selection ───────────────────────────────────────────────────────
@@ -809,11 +820,7 @@ func _apply_surface_frame_2d(move: Vector2, to_enemy: Vector2) -> Vector2:
 func _has_line_of_sight_2d() -> bool:
 	if not is_instance_valid(_body_2d) or not is_instance_valid(_enemy_2d):
 		return false
-	var space := _body_2d.get_world_2d().direct_space_state
-	var query := PhysicsRayQueryParameters2D.create(_body_2d.global_position, _enemy_2d.global_position)
-	query.exclude = [_body_2d.get_rid(), _enemy_2d.get_rid()]
-	var hit := space.intersect_ray(query)
-	return hit.is_empty()
+	return _is_path_clear_2d(_body_2d.global_position, _enemy_2d.global_position)
 
 
 func _predict_enemy_2d(enemy_pos: Vector2) -> Vector2:

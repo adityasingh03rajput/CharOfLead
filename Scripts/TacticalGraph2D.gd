@@ -8,11 +8,11 @@ extends RefCounted
 enum SurfaceType { FLOOR, WALL_LEFT, WALL_RIGHT, CEILING, LEDGE, AIR }
 enum ActionType { WALK, CLIMB, DROP, JUMP }
 
-struct GraphNode:
-	var id: int
-	var position: Vector2
-	var surface: int
-	var normal: Vector2
+class TacGraphNode:
+	var id: int = 0
+	var position: Vector2 = Vector2.ZERO
+	var surface: int = 0
+	var normal: Vector2 = Vector2.UP
 
 var _nodes: Dictionary = {} # id -> GraphNode (using class or dictionary representation)
 var _astar: AStar2D = AStar2D.new()

@@ -662,6 +662,12 @@ func _tick_2d(delta: float) -> void:
 			var path_res = _tactical_graph_2d.call("get_path_positions", self_pos, _target_attack_node_id)
 			if path_res is Array:
 				_tactical_path_2d = path_res
+			if (_tactical_path_2d.size() <= 1) and not has_los:
+				var enemy_node: int = _tactical_graph_2d.call("get_nearest_node_id", enemy_pos)
+				if enemy_node != -1 and enemy_node != _target_attack_node_id:
+					var enemy_path = _tactical_graph_2d.call("get_path_positions", self_pos, enemy_node)
+					if enemy_path is Array and not enemy_path.is_empty():
+						_tactical_path_2d = enemy_path
 
 		print("[BLUE 2D AI] Goal: %s | Self: %s | TargetNode: %d | PathSize: %d | LOS: %s" % [
 			active_goal, self_pos, _target_attack_node_id, _tactical_path_2d.size(), has_los

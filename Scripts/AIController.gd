@@ -327,6 +327,14 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 		return (target_pos - self_pos).normalized()
 
 	# ── TraversalExecutor2D: Data-driven event-based macro execution ───────
+	if _traversal_edges_2d.is_empty() and _tactical_graph_2d != null and _target_attack_node_id != -1:
+		var space := _body_2d.get_world_2d().direct_space_state
+		var edges_res = _tactical_graph_2d.call("get_traversal_edges", self_pos, _target_attack_node_id, space)
+		if edges_res is Array and not edges_res.is_empty():
+			_traversal_edges_2d = edges_res
+			if _traversal_executor_2d != null:
+				_traversal_executor_2d.call("start_edge", _traversal_edges_2d[0], self_pos)
+
 	if not _traversal_edges_2d.is_empty() and _traversal_executor_2d != null:
 		var exec_res: Dictionary = _traversal_executor_2d.call("tick", get_process_delta_time(), _body_2d, self_pos)
 		if exec_res.get("jump", false):
@@ -334,7 +342,14 @@ func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 		if exec_res.get("grapple", false):
 			_virt_grapple = true
 
-		if exec_res.get("completed", false):
+		if exec_res.get("failed", false):
+			var nav_tag := "RED 2D AI NAV" if ai_player_id == 1 else "BLUE 2D AI NAV"
+			print("[%s] ► Traversal FAILED! Forcing recovery replan." % nav_tag)
+			_traversal_edges_2d.clear()
+			_tactical_path_2d.clear()
+			_current_node_score = -999999.0
+			_replan_timer_2d = 0.0
+		elif exec_res.get("completed", false):
 			_traversal_edges_2d.pop_front()
 			if not _traversal_edges_2d.is_empty():
 				_traversal_executor_2d.call("start_edge", _traversal_edges_2d[0], self_pos)

@@ -1,0 +1,143 @@
+class_name TacticalGraph2D
+extends RefCounted
+## TacticalGraph2D.gd — Builds and manages the 2D surface navigation graph for CharOfLead.
+##
+## Maps every floor, wall, ceiling, shelf ledge, and aerial jump transition into a node.
+## Edges are weighted by action cost (walk, climb, drop, vault).
+
+enum SurfaceType { FLOOR, WALL_LEFT, WALL_RIGHT, CEILING, LEDGE, AIR }
+enum ActionType { WALK, CLIMB, DROP, JUMP }
+
+struct GraphNode:
+	var id: int
+	var position: Vector2
+	var surface: int
+	var normal: Vector2
+
+var _nodes: Dictionary = {} # id -> GraphNode (using class or dictionary representation)
+var _astar: AStar2D = AStar2D.new()
+
+# Arena grid dimensions & bounds (State B cross-section)
+const ARENA_CENTER := Vector2(0.0, 0.0)
+const ARENA_WIDTH  := 700.0
+const ARENA_HEIGHT := 500.0
+
+func _init() -> void:
+	_astar.clear()
+
+
+func build_graph(space_state: PhysicsDirectSpaceState2D = null) -> void:
+	_nodes.clear()
+	_astar.clear()
+
+	# Sample surfaces across key arena features:
+	# 1. Top Shelf (Floor Y = -120, X from -320 to 20)
+	# 2. Central Vertical Wall (Wall X = 20, Y from -120 to 120)
+	# 3. Lower Shelf (Floor Y = 120, X from 20 to 320)
+	# 4. Arena Floor (Y = 220, X from -340 to 340)
+	# 5. Arena Roof (Y = -220, X from -340 to 340)
+	# 6. Outer Left Wall (X = -340, Y from -220 to 220)
+	# 7. Outer Right Wall (X = 340, Y from -220 to 220)
+
+	var node_list: Array = []
+
+	# --- Top Shelf ---
+	for x in range(-320, 30, 40):
+		node_list.append({"pos": Vector2(x, -120.0), "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
+
+	# --- Central Vertical Wall ---
+	for y in range(-110, 120, 40):
+		node_list.append({"pos": Vector2(20.0, y), "surf": SurfaceType.WALL_RIGHT, "norm": Vector2.LEFT})
+
+	# --- Lower Shelf ---
+	for x in range(30, 330, 40):
+		node_list.append({"pos": Vector2(x, 120.0), "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
+
+	# --- Arena Bottom Floor ---
+	for x in range(-340, 350, 50):
+		node_list.append({"pos": Vector2(x, 220.0), "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
+
+	# --- Arena Ceiling / Roof ---
+	for x in range(-340, 350, 50):
+		node_list.append({"pos": Vector2(x, -220.0), "surf": SurfaceType.CEILING, "norm": Vector2.DOWN})
+
+	# --- Outer Left Wall ---
+	for y in range(-210, 220, 50):
+		node_list.append({"pos": Vector2(-340.0, y), "surf": SurfaceType.WALL_LEFT, "norm": Vector2.RIGHT})
+
+	# --- Outer Right Wall ---
+	for y in range(-210, 220, 50):
+		node_list.append({"pos": Vector2(340.0, y), "surf": SurfaceType.WALL_RIGHT, "norm": Vector2.LEFT})
+
+	# Add nodes to AStar2D graph
+	for i in node_list.size():
+		var data: Dictionary = node_list[i]
+		_nodes[i] = data
+		_astar.add_point(i, data["pos"])
+
+	# Build weighted edges between reachable nodes
+	for i in _nodes.keys():
+		var p1: Vector2 = _nodes[i]["pos"]
+		var s1: int = _nodes[i]["surf"]
+		for j in _nodes.keys():
+			if i >= j: continue
+			var p2: Vector2 = _nodes[j]["pos"]
+			var s2: int = _nodes[j]["surf"]
+			var dist := p1.distance_to(p2)
+
+			if dist > 140.0:
+				continue # Nodes too far apart for direct single-step transition
+
+			if _is_segment_clear(p1, p2, space_state):
+				var cost_mult := 1.0
+				if s1 == SurfaceType.WALL_LEFT or s1 == SurfaceType.WALL_RIGHT or s2 == SurfaceType.WALL_LEFT or s2 == SurfaceType.WALL_RIGHT:
+					cost_mult = 1.35 # Climbing cost
+				elif s1 == SurfaceType.CEILING or s2 == SurfaceType.CEILING:
+					cost_mult = 1.50 # Ceiling traverse cost
+				elif p1.y != p2.y and (s1 == SurfaceType.FLOOR or s2 == SurfaceType.FLOOR):
+					cost_mult = 1.20 # Jump/Drop transition cost
+
+				_astar.connect_points(i, j, true)
+				_astar.set_point_weight_scale(i, cost_mult)
+
+
+func _is_segment_clear(p1: Vector2, p2: Vector2, space_state: PhysicsDirectSpaceState2D) -> bool:
+	if not space_state:
+		return true
+	var query := PhysicsRayQueryParameters2D.create(p1, p2)
+	var hit := space_state.intersect_ray(query)
+	return hit.is_empty()
+
+
+func get_nearest_node_id(pos: Vector2) -> int:
+	if _astar.get_point_count() == 0:
+		return -1
+	return _astar.get_closest_point(pos)
+
+
+func get_node_pos(node_id: int) -> Vector2:
+	if _nodes.has(node_id):
+		return _nodes[node_id]["pos"]
+	return Vector2.ZERO
+
+
+func get_node_surface(node_id: int) -> int:
+	if _nodes.has(node_id):
+		return _nodes[node_id]["surf"]
+	return SurfaceType.FLOOR
+
+
+func get_path_positions(start_pos: Vector2, target_node_id: int) -> Array[Vector2]:
+	var start_id := get_nearest_node_id(start_pos)
+	if start_id == -1 or target_node_id == -1:
+		return []
+
+	var point_path := _astar.get_point_path(start_id, target_node_id)
+	var result: Array[Vector2] = []
+	for p in point_path:
+		result.append(p)
+	return result
+
+
+func get_all_node_ids() -> Array:
+	return _nodes.keys()

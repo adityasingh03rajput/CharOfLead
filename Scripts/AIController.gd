@@ -99,6 +99,8 @@ func setup(body3d: CharacterBody3D, body2d: CharacterBody2D,
 	_enabled  = true
 	_state    = AIState.SEEK
 	_init_nav()
+	if is_instance_valid(_body_2d):
+		_tactical_graph_2d.build_graph(_body_2d.get_world_2d().direct_space_state)
 	if is_instance_valid(GameManager) and not GameManager.health_changed.is_connected(_on_health_changed):
 		GameManager.health_changed.connect(_on_health_changed)
 	if is_instance_valid(GameManager):
@@ -262,23 +264,37 @@ func _is_path_clear_2d(from_2d: Vector2, to_2d: Vector2) -> bool:
 	return hit.is_empty()
 
 
+# ── Tactical Graph Pathfinding (State B 2D) ──────────────────────────────────
+var _tactical_graph_2d: TacticalGraph2D = TacticalGraph2D.new()
+var _tactical_path_2d: Array[Vector2] = []
+var _target_attack_node_id: int = -1
+var _replan_timer_2d: float = 0.0
+
 func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	if _is_path_clear_2d(self_pos, target_pos):
 		return (target_pos - self_pos).normalized()
 
-	# If direct path is blocked by a wall, find shelf edges / waypoints in 2D space
+	# If direct line-of-sight is blocked, use tactical graph pathfinding
+	if not _tactical_path_2d.is_empty():
+		var waypoint: Vector2 = _tactical_path_2d[0]
+		if self_pos.distance_to(waypoint) < 40.0:
+			_tactical_path_2d.pop_front()
+			if not _tactical_path_2d.is_empty():
+				waypoint = _tactical_path_2d[0]
+
+		var way_dir := (waypoint - self_pos).normalized()
+		if is_instance_valid(_body_2d):
+			if _body_2d.is_on_wall():
+				_virt_jump = true
+			elif waypoint.y < self_pos.y - 20.0 and _body_2d.is_on_floor():
+				_virt_jump = true
+		return way_dir
+
 	var shelf_route_x := _find_best_2d_shelf_route(self_pos, target_pos)
 	var route_dir := Vector2(shelf_route_x, 0.0)
-
-	# If we are near the edge of the shelf or touching a wall, jump/drop!
-	if is_instance_valid(_body_2d):
-		if _body_2d.is_on_wall():
-			route_dir = Vector2(-shelf_route_x, -1.0).normalized()
-			_virt_jump = true
-		elif absf(target_pos.y - self_pos.y) > 30.0:
-			if target_pos.y < self_pos.y and _body_2d.is_on_floor():
-				_virt_jump = true # Leap to upper ledge
-
+	if is_instance_valid(_body_2d) and _body_2d.is_on_wall():
+		route_dir = Vector2(-shelf_route_x, -1.0).normalized()
+		_virt_jump = true
 	return route_dir.normalized()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -562,16 +578,27 @@ func _aim_and_fire_3d() -> void:
 # ══════════════════════════════════════════════════════════════════════════════
 # 2-D BRAIN  (State B — Blue is hunter/assassin)
 # ══════════════════════════════════════════════════════════════════════════════
-func _tick_2d(_delta: float) -> void:
+func _tick_2d(delta: float) -> void:
 	if not is_instance_valid(_body_2d) or not is_instance_valid(_enemy_2d):
 		return
 	if _body_2d.get("_is_dead") or _enemy_2d.get("_is_dead"):
 		return
 
+	_replan_timer_2d -= delta
 	var self_pos: Vector2  = _body_2d.global_position
 	var enemy_pos: Vector2 = _enemy_2d.global_position
 	var to_enemy: Vector2  = enemy_pos - self_pos
 	var dist: float        = to_enemy.length()
+
+	var space := _body_2d.get_world_2d().direct_space_state
+	if _replan_timer_2d <= 0.0 or _tactical_path_2d.is_empty():
+		_replan_timer_2d = 0.18 # 180ms decision frequency
+		_target_attack_node_id = TacticalEvaluator2D.select_best_attack_node(
+			_tactical_graph_2d, self_pos, enemy_pos, space,
+			_body_2d.get_rid(), _enemy_2d.get_rid()
+		)
+		if _target_attack_node_id != -1:
+			_tactical_path_2d = _tactical_graph_2d.get_path_positions(self_pos, _target_attack_node_id)
 
 	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else (ai_player_id == 2)
 

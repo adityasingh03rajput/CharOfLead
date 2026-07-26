@@ -272,6 +272,9 @@ var _replan_timer_2d: float = 0.0
 
 func _get_nav_dir_2d(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	if _is_path_clear_2d(self_pos, target_pos):
+		if is_instance_valid(_body_2d):
+			if _body_2d.is_on_wall() or _body_2d.is_on_ceiling():
+				_virt_jump = true # Push off wall/ceiling into open air!
 		return (target_pos - self_pos).normalized()
 
 	# If direct line-of-sight is blocked, use tactical graph pathfinding
@@ -630,40 +633,17 @@ func _tick_2d(delta: float) -> void:
 
 
 func _ai_2d_seek(to_enemy: Vector2, enemy_pos: Vector2) -> void:
-	var has_los := _has_line_of_sight_2d()
-	_virt_move = _smart_2d_move_toward(to_enemy)
-	_virt_mouse_world = _predict_enemy_2d(enemy_pos)
-
-	# ── Emergency Unstick Override ─────────────────────────────────────────
-	if _unstick_flank_timer > 0.0:
-		_virt_move.x = _unstick_flank_dir
-		_virt_move.y = -1.0 # hold UP to mount/climb
-		_virt_jump = true   # leap off obstruction!
+	if not is_instance_valid(_body_2d):
 		return
 
-	# ── Intelligent Wall & Ledge Navigation ────────────────────────────────
-	if not has_los and is_instance_valid(_body_2d):
-		var is_on_wall: bool = _body_2d.is_on_wall()
-		var st: int = int(_body_2d.get("_current_state")) # 1=WALL_LEFT, 2=WALL_RIGHT
+	var self_pos := _body_2d.global_position
+	var nav_dir := _get_nav_dir_2d(self_pos, enemy_pos)
 
-		if is_on_wall or st == 1 or st == 2:
-			# Stuck on wall or mounted -> climb up/down toward enemy's Y elevation
-			var climb_dir := signf(to_enemy.y)
-			if climb_dir == 0.0: climb_dir = -1.0
-			_virt_move.y = climb_dir
-			_virt_move.x = -signf(to_enemy.x) # step BACK from wall face to allow leap!
-			_virt_jump = true
-		elif absf(to_enemy.y) > 40.0:
-			# Enemy is on another shelf level -> probe left vs right routes to find drop edge / wall climb!
-			if to_enemy.y < -40.0 and _body_2d.is_on_floor():
-				_virt_jump = true # Leap up to upper shelf/ledge!
-				_virt_move.x = _find_best_2d_shelf_route(_body_2d.global_position, enemy_pos)
-			elif to_enemy.y > 40.0 and _body_2d.is_on_floor():
-				# Enemy is below -> probe left vs right shelf edge to drop down!
-				_virt_move.x = _find_best_2d_shelf_route(_body_2d.global_position, enemy_pos)
+	_virt_move = _apply_surface_frame_2d(nav_dir, to_enemy)
+	_virt_mouse_world = _predict_enemy_2d(enemy_pos)
 
 	var is_ai_armed: bool = GameManager.is_armed(ai_player_id) if is_instance_valid(GameManager) else true
-	if is_ai_armed and _react_timer <= 0.0 and has_los:
+	if is_ai_armed and _react_timer <= 0.0 and _has_line_of_sight_2d():
 		_virt_fire   = true
 		_react_timer = REACT_DELAY[ai_difficulty]
 

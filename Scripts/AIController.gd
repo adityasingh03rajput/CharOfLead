@@ -252,16 +252,42 @@ func _get_nav_dir(self_pos: Vector2, target_pos: Vector2) -> Vector2:
 	_astar.remove_point(id_t)
 	return dir
 
+const MAZE_WALL_BOXES_2D = [
+	Rect2(Vector2(-310.0, -115.0), Vector2(335.0, 30.0)), # Top Shelf Wall Box
+	Rect2(Vector2(-15.0, -120.0), Vector2(30.0, 240.0)),  # Central Vertical Wall Box
+	Rect2(Vector2(-25.0, 85.0), Vector2(335.0, 30.0))     # Lower Shelf Wall Box
+]
+
 func _is_path_clear_2d(from_2d: Vector2, to_2d: Vector2) -> bool:
-	if not is_instance_valid(_body_2d):
-		return true
-	var space := _body_2d.get_world_2d().direct_space_state
-	var query := PhysicsRayQueryParameters2D.create(from_2d, to_2d)
-	query.exclude = [_body_2d.get_rid()]
-	if is_instance_valid(_enemy_2d):
-		query.exclude.append(_enemy_2d.get_rid())
-	var hit := space.intersect_ray(query)
-	return hit.is_empty()
+	for box in MAZE_WALL_BOXES_2D:
+		if _segment_intersects_rect(from_2d, to_2d, box):
+			return false
+
+	if is_instance_valid(_body_2d):
+		var space := _body_2d.get_world_2d().direct_space_state
+		var query := PhysicsRayQueryParameters2D.create(from_2d, to_2d)
+		query.exclude = [_body_2d.get_rid()]
+		if is_instance_valid(_enemy_2d):
+			query.exclude.append(_enemy_2d.get_rid())
+		query.collision_mask = 1
+		var hit := space.intersect_ray(query)
+		if not hit.is_empty():
+			return false
+
+	return true
+
+func _segment_intersects_rect(p1: Vector2, p2: Vector2, rect: Rect2) -> bool:
+	var r_top    := rect.position
+	var r_bottom := rect.position + rect.size
+	var r_right  := Vector2(r_bottom.x, r_top.y)
+	var r_left   := Vector2(r_top.x, r_bottom.y)
+
+	if Geometry2D.segment_intersects_segment(p1, p2, r_top, r_right) != null: return true
+	if Geometry2D.segment_intersects_segment(p1, p2, r_right, r_bottom) != null: return true
+	if Geometry2D.segment_intersects_segment(p1, p2, r_bottom, r_left) != null: return true
+	if Geometry2D.segment_intersects_segment(p1, p2, r_left, r_top) != null: return true
+
+	return false
 
 
 # ── Tactical Graph Pathfinding (State B 2D) ──────────────────────────────────

@@ -45,9 +45,13 @@ func build_graph(space_state: PhysicsDirectSpaceState2D = null) -> void:
 	for x in range(-320, 30, 40):
 		node_list.append({"pos": Vector2(x, -120.0), "surf": SurfaceType.FLOOR, "norm": Vector2.UP})
 
-	# --- Central Vertical Wall ---
-	for y in range(-110, 120, 40):
-		node_list.append({"pos": Vector2(20.0, y), "surf": SurfaceType.WALL_RIGHT, "norm": Vector2.LEFT})
+	# --- Central Vertical Wall (Left Face) ---
+	for y in range(-110, 110, 35):
+		node_list.append({"pos": Vector2(-25.0, y), "surf": SurfaceType.WALL_LEFT, "norm": Vector2.RIGHT})
+
+	# --- Central Vertical Wall (Right Face) ---
+	for y in range(-110, 110, 35):
+		node_list.append({"pos": Vector2(25.0, y), "surf": SurfaceType.WALL_RIGHT, "norm": Vector2.LEFT})
 
 	# --- Lower Shelf ---
 	for x in range(30, 330, 40):
@@ -85,7 +89,7 @@ func build_graph(space_state: PhysicsDirectSpaceState2D = null) -> void:
 			var s2: int = _nodes[j]["surf"]
 			var dist := p1.distance_to(p2)
 
-			if dist > 140.0:
+			if dist > 150.0:
 				continue # Nodes too far apart for direct single-step transition
 
 			if _is_segment_clear(p1, p2, space_state):
@@ -101,10 +105,29 @@ func build_graph(space_state: PhysicsDirectSpaceState2D = null) -> void:
 				_astar.set_point_weight_scale(i, cost_mult)
 
 
+const WALL_BOXES = [
+	Rect2(Vector2(-310.0, -115.0), Vector2(335.0, 30.0)), # Top Shelf Wall Box
+	Rect2(Vector2(-15.0, -120.0), Vector2(30.0, 240.0)),  # Central Vertical Wall Box
+	Rect2(Vector2(-25.0, 85.0), Vector2(335.0, 30.0))     # Lower Shelf Wall Box
+]
+
 func _is_segment_clear(p1: Vector2, p2: Vector2, space_state: PhysicsDirectSpaceState2D) -> bool:
+	for box in WALL_BOXES:
+		var r_top    := box.position
+		var r_bottom := box.position + box.size
+		var r_right  := Vector2(r_bottom.x, r_top.y)
+		var r_left   := Vector2(r_top.x, r_bottom.y)
+
+		if Geometry2D.segment_intersects_segment(p1, p2, r_top, r_right) != null: return false
+		if Geometry2D.segment_intersects_segment(p1, p2, r_right, r_bottom) != null: return false
+		if Geometry2D.segment_intersects_segment(p1, p2, r_bottom, r_left) != null: return false
+		if Geometry2D.segment_intersects_segment(p1, p2, r_left, r_top) != null: return false
+
 	if not space_state:
 		return true
+
 	var query := PhysicsRayQueryParameters2D.create(p1, p2)
+	query.collision_mask = 1
 	var hit := space_state.intersect_ray(query)
 	return hit.is_empty()
 
